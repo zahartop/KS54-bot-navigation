@@ -1,0 +1,6 @@
+# Локальная разработка и CI (не ставить в prod-образ)
+-r requirements.txt
+
+pytest>=8.0.0
+ruff>=0.6.0
+black>=24.0.0

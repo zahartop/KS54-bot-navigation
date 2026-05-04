@@ -1,0 +1,29 @@
+# Локальная среда и секреты
+venv/
+.env
+.env.*
+
+# Git и кэши Python
+.git/
+.gitignore
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# Логи
+logs/
+*.log
+**/*.log
+
+# IDE и сборки
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
+.ruff_cache/
+htmlcov/
+coverage.xml
