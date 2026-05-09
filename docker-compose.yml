@@ -71,6 +71,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Частый случай: DNS отдаёт IPv6 для api.telegram.org, а выхода по IPv6 нет → таймаут get_me.
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1
     dns:

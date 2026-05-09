@@ -10,7 +10,9 @@ import urllib.request
 
 
 def main() -> None:
-    port_raw = os.environ.get("HEALTHCHECK_PORT", "8080").strip()
+    # Дефолт 0 совпадает с Settings.HEALTHCHECK_PORT: без порта HTTP-сервер не поднимается,
+    # а пробовать 8080 было бы Connection refused → контейнер «unhealthy».
+    port_raw = os.environ.get("HEALTHCHECK_PORT", "0").strip()
     try:
         port = int(port_raw)
     except ValueError:

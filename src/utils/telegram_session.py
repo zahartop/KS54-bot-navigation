@@ -2,8 +2,29 @@
 
 from __future__ import annotations
 
+import socket
+from typing import Any
+
 from aiohttp import ClientTimeout
 from aiogram.client.session.aiohttp import AiohttpSession
+
+from src.config.settings import Settings
+
+
+class _TelegramAiohttpSession(AiohttpSession):
+    """TCPConnector с опциональным family=AF_INET (обход сломанного IPv6 до api.telegram.org)."""
+
+    def __init__(
+        self,
+        proxy: Any = None,
+        *,
+        force_ipv4: bool = False,
+        limit: int = 100,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(proxy=proxy, limit=limit, **kwargs)
+        if force_ipv4:
+            self._connector_init = {**self._connector_init, "family": socket.AF_INET}
 
 
 def build_telegram_client_timeout(total_seconds: float) -> ClientTimeout:
@@ -17,5 +38,13 @@ def build_telegram_client_timeout(total_seconds: float) -> ClientTimeout:
     return ClientTimeout(total=total_cap, connect=connect, sock_read=sock_read)
 
 
-def create_bot_aiohttp_session(total_seconds: float) -> AiohttpSession:
-    return AiohttpSession(timeout=build_telegram_client_timeout(total_seconds))
+def create_bot_aiohttp_session(settings: Settings) -> AiohttpSession:
+    total_seconds = float(max(30.0, settings.TELEGRAM_HTTP_TIMEOUT_SECONDS))
+    timeout = build_telegram_client_timeout(total_seconds)
+    proxy_raw = settings.TELEGRAM_PROXY.get_secret_value().strip()
+    proxy = proxy_raw if proxy_raw else None
+    return _TelegramAiohttpSession(
+        proxy=proxy,
+        timeout=timeout,
+        force_ipv4=settings.TELEGRAM_FORCE_IPV4,
+    )

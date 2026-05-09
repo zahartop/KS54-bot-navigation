@@ -59,8 +59,7 @@ async def run_health_watchdog() -> None:
 
     text = "<b>College Bot — мониторинг</b>\n\n" + "".join(issues)
 
-    tg_timeout = float(max(30.0, settings.TELEGRAM_HTTP_TIMEOUT_SECONDS))
-    bot = Bot(token=settings.BOT_TOKEN.get_secret_value().strip(), session=create_bot_aiohttp_session(tg_timeout))
+    bot = Bot(token=settings.BOT_TOKEN.get_secret_value().strip(), session=create_bot_aiohttp_session(settings))
     try:
         await bot.send_message(aid, text[:3900], parse_mode="HTML")
     except Exception:
@@ -74,10 +73,7 @@ async def _tg_warn_plain(text_plain: str) -> None:
     if settings.ADMIN_ID <= 0:
         return
 
-    bot = Bot(
-        token=settings.BOT_TOKEN.get_secret_value().strip(),
-        session=create_bot_aiohttp_session(float(max(30.0, settings.TELEGRAM_HTTP_TIMEOUT_SECONDS))),
-    )
+    bot = Bot(token=settings.BOT_TOKEN.get_secret_value().strip(), session=create_bot_aiohttp_session(settings))
     try:
         await bot.send_message(settings.ADMIN_ID, text_plain[:4000])
     except Exception:

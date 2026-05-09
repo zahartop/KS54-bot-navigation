@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     )
     # Таймаут HTTP к api.telegram.org (сек). В Docker при «Request timeout» увеличьте до 120–180.
     TELEGRAM_HTTP_TIMEOUT_SECONDS: float = 120.0
+    # Только IPv4 для aiohttp (VPS с «битым» IPv6: DNS отдаёт AAAA → таймаут get_me / polling).
+    TELEGRAM_FORCE_IPV4: bool = False
+    # SOCKS5/SOCKS4 или цепочка — см. aiogram + aiohttp-socks; для HTTP CONNECT подберите прокси с поддержкой HTTPS.
+    TELEGRAM_PROXY: SecretStr = Field(default_factory=lambda: SecretStr(""))
     # Ретраи get_me при старте сессии (экспоненциальная пауза между попытками).
     TELEGRAM_STARTUP_MAX_ATTEMPTS: int = Field(default=8, ge=5, le=10)
     TELEGRAM_STARTUP_BACKOFF_INITIAL_SECONDS: float = Field(default=2.0, ge=0.5)

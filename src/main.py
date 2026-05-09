@@ -172,8 +172,7 @@ async def _run_single_bot_session() -> None:
 
     settings = get_settings()
     token = settings.BOT_TOKEN.get_secret_value().strip()
-    tg_timeout = float(max(30.0, settings.TELEGRAM_HTTP_TIMEOUT_SECONDS))
-    bot = Bot(token=token, session=create_bot_aiohttp_session(tg_timeout))
+    bot = Bot(token=token, session=create_bot_aiohttp_session(settings))
 
     alert_task = start_alert_consumer_task(bot)
     attach_admin_telegram_log_handler()

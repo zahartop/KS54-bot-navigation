@@ -41,8 +41,7 @@ async def execute_dod_reminder(
         if reminder_kind == "24h"
         else DOD_REMINDER_2H.format(date=event_date_label)
     )
-    tg_timeout = float(max(30.0, settings.TELEGRAM_HTTP_TIMEOUT_SECONDS))
-    bot = Bot(token=settings.BOT_TOKEN.get_secret_value().strip(), session=create_bot_aiohttp_session(tg_timeout))
+    bot = Bot(token=settings.BOT_TOKEN.get_secret_value().strip(), session=create_bot_aiohttp_session(settings))
     try:
         await bot.send_message(telegram_user_id, text, parse_mode="HTML")
         logger.info(
