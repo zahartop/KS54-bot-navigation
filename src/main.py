@@ -172,6 +172,11 @@ async def _run_single_bot_session() -> None:
 
     settings = get_settings()
     token = settings.BOT_TOKEN.get_secret_value().strip()
+    logger.info(
+        "Telegram client: TELEGRAM_FORCE_IPV4=%s, TELEGRAM_PROXY=%s",
+        settings.TELEGRAM_FORCE_IPV4,
+        "yes" if settings.TELEGRAM_PROXY.get_secret_value().strip() else "no",
+    )
     bot = Bot(token=token, session=create_bot_aiohttp_session(settings))
 
     alert_task = start_alert_consumer_task(bot)

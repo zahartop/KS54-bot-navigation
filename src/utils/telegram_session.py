@@ -24,7 +24,12 @@ class _TelegramAiohttpSession(AiohttpSession):
     ) -> None:
         super().__init__(proxy=proxy, limit=limit, **kwargs)
         if force_ipv4:
-            self._connector_init = {**self._connector_init, "family": socket.AF_INET}
+            # family=AF_INET — только A-записи; happy_eyeballs_delay отключаем на всякий случай.
+            self._connector_init = {
+                **self._connector_init,
+                "family": socket.AF_INET,
+                "happy_eyeballs_delay": None,
+            }
 
 
 def build_telegram_client_timeout(total_seconds: float) -> ClientTimeout:
