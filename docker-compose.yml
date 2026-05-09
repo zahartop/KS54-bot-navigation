@@ -2,8 +2,6 @@ services:
   db:
     image: postgres:15-alpine
     container_name: college-bot-db
-    ports:
-      - "127.0.0.1:5432:5432"
     restart: always
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -34,7 +32,6 @@ services:
     image: redis:7-alpine
     container_name: college-bot-redis
     restart: always
-    # RDB-снапшот: сохранять каждые 60 сек, если изменилось ≥1 ключ
     command: redis-server --save 60 1 --loglevel warning
     volumes:
       - redis_data:/data
@@ -69,12 +66,13 @@ services:
       REDIS_HOST: redis
     volumes:
       - bot_logs:/app/logs
-      - ./policy.pdf:/app/policy.pdf:ro
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
     dns:
       - 8.8.8.8
       - 1.1.1.1
