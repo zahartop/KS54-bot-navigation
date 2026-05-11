@@ -12,7 +12,6 @@ from zoneinfo import ZoneInfo
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
 from src.config.settings import Settings
 from src.utils.pii import mask_for_log
 

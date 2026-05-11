@@ -5,8 +5,8 @@ from __future__ import annotations
 import socket
 from typing import Any
 
-from aiohttp import ClientTimeout
 from aiogram.client.session.aiohttp import AiohttpSession
+from aiohttp import ClientTimeout
 
 from src.config.settings import Settings
 

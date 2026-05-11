@@ -4,7 +4,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.config.content import (
-    BTN_PRIVACY_POLICY,
     BTN_ABOUT_COLLEGE,
     BTN_BACK,
     BTN_CAREER,
@@ -13,6 +12,7 @@ from src.config.content import (
     BTN_FIND_SPECIALTY,
     BTN_HOW_TO_APPLY,
     BTN_OPEN_DAY,
+    BTN_PRIVACY_POLICY,
     BTN_SPECIALTIES_9,
     BTN_SPECIALTIES_11,
     BTN_WEBSITE,

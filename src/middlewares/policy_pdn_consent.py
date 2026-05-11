@@ -6,10 +6,9 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware, types
-from aiogram.fsm.context import FSMContext
 from aiogram.enums import MessageEntityType
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject
-
 from src.config.content import CONSENT_PENDING_ALERT, NEXT_FORM_AFTER_CONSENT_BROWSE, OPEN_DAY_DATE_CHOSEN
 from src.data.user_repository import UserRepository
 from src.logic.abi.states.admission_form import ConsentState

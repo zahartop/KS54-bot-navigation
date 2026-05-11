@@ -8,7 +8,6 @@ from typing import Any, Awaitable, Callable
 from aiogram import BaseMiddleware, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject
-
 from src.data.user_repository import UserRepository
 from src.logic.admin.states.broadcast import BroadcastForm
 

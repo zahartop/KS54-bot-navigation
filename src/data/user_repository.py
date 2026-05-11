@@ -19,7 +19,6 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from src.data.models import (
     BroadcastRecoveryJob,
     OpenDayApplication,
