@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     BOT_TOKEN: SecretStr
     ADMIN_ID: int = Field(
         default=0,
-        description="Telegram user id: лог-алерты, watchdog; при >0 также полный доступ к /admin (дублирует is_admin в БД).",
+        description=(
+            "Telegram user id: лог-алерты, watchdog;"
+            " при >0 также полный доступ к /admin (дублирует is_admin в БД)."
+        ),
     )
     # Таймаут HTTP к api.telegram.org (сек). В Docker при «Request timeout» увеличьте до 120–180.
     TELEGRAM_HTTP_TIMEOUT_SECONDS: float = 120.0

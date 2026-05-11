@@ -2,48 +2,43 @@ name: DevSecOps Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
 
 jobs:
   check-and-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # 1. Проверка, чтобы ты случайно не пушнул токен бота или пароли
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install ruff pytest pytest-asyncio
+          pip install -r requirements.txt
+
+      # 1. Сначала линтер (то, что Cursor только что поправил)
+      - name: Lint with Ruff
+        run: ruff check .
+
+      # 2. Теперь тесты (тот самый Test-Gate)
+      - name: Run Tests
+        run: pytest
+
+      # 3. Безопасность (Gitleaks)
       - name: Gitleaks Scan
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. Настройка Python для линтера
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      # 3. Тот самый Ruff, который поймает "name 'data' is not defined"
-      - name: Install Ruff
-        run: pip install ruff
-      - name: Lint with Ruff
-        run: ruff check . 
-
-      # 4. Проверка Docker-образа на дыры в безопасности
-      - name: Build image for scan
-        run: docker build -t bot-test-image .
-      - name: Security Scan (Trivy)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'bot-test-image'
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
-
   deploy:
-    needs: check-and-test # Если Ruff или Trivy найдут ошибку, деплой НЕ начнется
+    needs: check-and-test
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3

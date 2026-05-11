@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot
+
 from src.config.settings import get_settings
-from src.utils.telegram_session import create_bot_aiohttp_session
 from src.data.database import db_manager
 from src.monitoring import metrics as mon_metrics
+from src.utils.telegram_session import create_bot_aiohttp_session
 
 _LOG = logging.getLogger(__name__)
 
