@@ -19,8 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 def _create_engine(settings) -> AsyncEngine:
+    url = settings.effective_database_url
+    if url.startswith("sqlite"):
+        return create_async_engine(url)
     return create_async_engine(
-        settings.effective_database_url,
+        url,
         pool_pre_ping=True,
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,

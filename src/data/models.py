@@ -49,6 +49,9 @@ class TelegramUser(Base):
         nullable=False,
         server_default="false",
     )
+    saved_fio: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    saved_phone: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    saved_email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     __table_args__ = ()
 

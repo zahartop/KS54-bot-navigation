@@ -12,8 +12,10 @@ from src.config.content import (
     CONSENT_TEXT,
     FORM_ASK_FIO,
     OPEN_DAY_DATE_CHOSEN,
+    SAVED_PROFILE_PROMPT,
 )
-from src.logic.abi.keyboards.kb import cancel_input_kb, get_consent_kb
+from src.data.user_repository import UserRepository
+from src.logic.abi.keyboards.kb import cancel_input_kb, get_consent_kb, saved_profile_kb
 from src.logic.abi.states.admission_form import AdmissionForm
 from src.utils.ui_utils import safe_edit_text
 
@@ -46,13 +48,29 @@ async def send_consent_screen_for_message(
 
 
 async def enter_open_day_form_after_policy(
-    callback: types.CallbackQuery, state: FSMContext, selected_date: str
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    selected_date: str,
+    user_repository: UserRepository | None = None,
 ) -> None:
     await state.update_data(open_day_date=selected_date, next_form="open_day")
-    await state.set_state(AdmissionForm.fio)
     await safe_edit_text(
         callback.message,
         OPEN_DAY_DATE_CHOSEN.format(date=selected_date),
         parse_mode="HTML",
     )
-    await callback.message.answer(FORM_ASK_FIO, reply_markup=cancel_input_kb(), parse_mode="HTML")
+
+    saved = None
+    if user_repository and callback.from_user:
+        saved = await user_repository.get_saved_profile(callback.from_user.id)
+
+    if saved:
+        await state.set_state(AdmissionForm.saved_profile_choice)
+        await callback.message.answer(
+            SAVED_PROFILE_PROMPT.format(fio=saved["fio"], phone=saved["phone"], email=saved["email"]),
+            reply_markup=saved_profile_kb(saved["fio"]),
+            parse_mode="HTML",
+        )
+    else:
+        await state.set_state(AdmissionForm.fio)
+        await callback.message.answer(FORM_ASK_FIO, reply_markup=cancel_input_kb(), parse_mode="HTML")

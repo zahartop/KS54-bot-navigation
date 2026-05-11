@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 def _sync_sqlalchemy_url(async_url: str) -> str:
     u = async_url.strip()
+    if u.startswith("sqlite"):
+        return u.replace("sqlite+aiosqlite:", "sqlite:", 1)
     if u.startswith("postgresql+asyncpg://"):
         return "postgresql+psycopg2://" + u[len("postgresql+asyncpg://") :]
     if u.startswith("postgresql+psycopg://"):

@@ -35,15 +35,25 @@ def upgrade() -> None:
             sa.PrimaryKeyConstraint("telegram_user_id"),
         )
 
-    op.execute(
-        sa.text("""
-            INSERT INTO telegram_users (telegram_user_id, is_policy_accepted)
-            SELECT DISTINCT telegram_user_id, TRUE
-            FROM pd_consents
-            ON CONFLICT (telegram_user_id) DO UPDATE
-            SET is_policy_accepted = TRUE
-        """)
-    )
+    dialect = bind.dialect.name
+    if dialect == "sqlite":
+        op.execute(
+            sa.text("""
+                INSERT OR REPLACE INTO telegram_users (telegram_user_id, is_policy_accepted)
+                SELECT DISTINCT telegram_user_id, 1
+                FROM pd_consents
+            """)
+        )
+    else:
+        op.execute(
+            sa.text("""
+                INSERT INTO telegram_users (telegram_user_id, is_policy_accepted)
+                SELECT DISTINCT telegram_user_id, TRUE
+                FROM pd_consents
+                ON CONFLICT (telegram_user_id) DO UPDATE
+                SET is_policy_accepted = TRUE
+            """)
+        )
 
 
 def downgrade() -> None:

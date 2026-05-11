@@ -6,6 +6,7 @@ venv/
 *.log
 logs/
 database.db
+*.db
 *.sqlite
 *.sqlite3
 .pytest_cache/

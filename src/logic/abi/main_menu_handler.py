@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -19,6 +20,7 @@ from src.config.content import (
     CANCEL_MESSAGE,
     CONSENT_ERROR,
     CONSENT_REJECTED,
+    FORM_ASK_FIO,
     FORM_ASK_FIO_SPECIALTY,
     FORM_DB_TECHNICAL_ERROR,
     FORM_ERROR_EMAIL,
@@ -35,6 +37,7 @@ from src.config.content import (
     SECTION_NOT_FOUND,
     SPECIALTY_DUPLICATE,
     SPECIALTY_SUCCESS,
+    SURVEY_ASK_REGION,
     TEST_RESULTS,
     WELCOME_MESSAGE,
 )
@@ -46,17 +49,21 @@ from src.logic.abi.keyboards.kb import (
     dates_kb,
     specialty_confirm_kb,
 )
+from src.logic.abi.keyboards.survey_kb import region_kb
 from src.logic.abi.states.admission_form import (
     AdmissionForm,
     ConsentState,
     SpecialtyRequestForm,
+    SurveyState,
     TestState,
 )
+from src.services.integrations import IntegrationService
+from src.services.webhooks import WebhookService
 from src.utils.consent_flow import enter_open_day_form_after_policy
 from src.utils.keyboards import KeyboardFactory
 from src.utils.pii import mask_pii
 from src.utils.safe_handler import safe_handler
-from src.utils.ui_utils import safe_edit_text
+from src.utils.ui_utils import delete_prev_message, safe_edit_text, track_message
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -333,10 +340,12 @@ async def open_day_dates_from_menu(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("open_day_date:"))
 @safe_handler
-async def open_day_date_selected(callback: types.CallbackQuery, state: FSMContext):
+async def open_day_date_selected(
+    callback: types.CallbackQuery, state: FSMContext, user_repository: UserRepository
+):
     selected_date = callback.data.split("open_day_date:", maxsplit=1)[1]
     logger.info("Выбрана дата ДОД: user_id=%s, date=%s", callback.from_user.id, selected_date)
-    await enter_open_day_form_after_policy(callback, state, selected_date)
+    await enter_open_day_form_after_policy(callback, state, selected_date, user_repository)
     await callback.answer()
 
 
@@ -350,20 +359,6 @@ async def open_day_back_to_main_menu(callback: types.CallbackQuery, state: FSMCo
         reply_markup=KeyboardFactory.create_main_menu_keyboard(),
         parse_mode="HTML",
     )
-    await callback.answer()
-
-
-# ─── Подбор специальности ────────────────────────────────────────────────────
-
-
-@router.callback_query(F.data == "find_specialty")
-@safe_handler
-async def start_specialty_request(callback: types.CallbackQuery, state: FSMContext):
-    logger.info("Старт анкеты подбора специальности: user_id=%s", callback.from_user.id)
-    await state.clear()
-    await state.update_data(next_form="specialty")
-    await state.set_state(SpecialtyRequestForm.fio)
-    await callback.message.answer(FORM_ASK_FIO_SPECIALTY, reply_markup=cancel_input_kb(), parse_mode="HTML")
     await callback.answer()
 
 
@@ -400,7 +395,7 @@ async def consent_accept(
             )
             await callback.answer()
             return
-        await enter_open_day_form_after_policy(callback, state, str(open_day_date))
+        await enter_open_day_form_after_policy(callback, state, str(open_day_date), user_repository)
     elif next_form == NEXT_FORM_AFTER_CONSENT_BROWSE:
         try:
             await callback.message.delete()
@@ -417,8 +412,9 @@ async def consent_accept(
             await callback.message.delete()
         except Exception:
             logger.info("Согласие (специальность): не удалось удалить сообщение с экраном политики.", exc_info=True)
-        await state.set_state(SpecialtyRequestForm.fio)
-        await callback.message.answer(FORM_ASK_FIO_SPECIALTY, reply_markup=cancel_input_kb(), parse_mode="HTML")
+        await state.update_data(next_form="specialty")
+        await state.set_state(SurveyState.region)
+        await callback.message.answer(SURVEY_ASK_REGION, reply_markup=region_kb())
     else:
         await state.clear()
         await callback.message.answer(
@@ -444,12 +440,88 @@ async def consent_reject(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+# ─── Сохранённый профиль (use_saved / new) ────────────────────────────────────
+
+
+@router.callback_query(F.data == "use_saved_profile", AdmissionForm.saved_profile_choice)
+@safe_handler
+async def use_saved_profile_od(
+    callback: types.CallbackQuery, state: FSMContext, user_repository: UserRepository
+):
+    saved = await user_repository.get_saved_profile(callback.from_user.id)
+    if not saved:
+        await state.set_state(AdmissionForm.fio)
+        await safe_edit_text(callback.message, FORM_ASK_FIO, reply_markup=cancel_input_kb(), parse_mode="HTML")
+        await callback.answer()
+        return
+    await state.update_data(fio=saved["fio"], phone=saved["phone"], email=saved["email"])
+    await state.set_state(AdmissionForm.email)
+    await safe_edit_text(
+        callback.message,
+        (
+            f"Данные заполнены:\n<b>ФИО:</b> {saved['fio']}\n"
+            f"<b>Телефон:</b> {saved['phone']}\n<b>Email:</b> {saved['email']}\n\n"
+            "Отправьте email ещё раз для подтверждения или введите новый:"
+        ),
+        reply_markup=cancel_input_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "new_profile", AdmissionForm.saved_profile_choice)
+@safe_handler
+async def new_profile_od(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(AdmissionForm.fio)
+    await safe_edit_text(callback.message, FORM_ASK_FIO, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "use_saved_profile", SpecialtyRequestForm.saved_profile_choice)
+@safe_handler
+async def use_saved_profile_spec(
+    callback: types.CallbackQuery, state: FSMContext, user_repository: UserRepository
+):
+    saved = await user_repository.get_saved_profile(callback.from_user.id)
+    if not saved:
+        await state.set_state(SpecialtyRequestForm.fio)
+        await safe_edit_text(
+            callback.message, FORM_ASK_FIO_SPECIALTY, reply_markup=cancel_input_kb(), parse_mode="HTML"
+        )
+        await callback.answer()
+        return
+    await state.update_data(fio=saved["fio"], phone=saved["phone"], email=saved["email"])
+    await state.set_state(SpecialtyRequestForm.confirm)
+    await safe_edit_text(
+        callback.message,
+        (
+            f"Давай перепроверим, всё ли правильно?\n"
+            f"<b>ФИО:</b> {saved['fio']}\n<b>Почта:</b> {saved['email']}\n"
+            f"<b>Телефон:</b> {saved['phone']}"
+        ),
+        reply_markup=specialty_confirm_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "new_profile", SpecialtyRequestForm.saved_profile_choice)
+@safe_handler
+async def new_profile_spec(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(SpecialtyRequestForm.fio)
+    await safe_edit_text(
+        callback.message, FORM_ASK_FIO_SPECIALTY, reply_markup=cancel_input_kb(), parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 # ─── Форма ДОД ───────────────────────────────────────────────────────────────
 
 
 @router.message(AdmissionForm.fio)
 @safe_handler
-async def process_fio(message: types.Message, state: FSMContext):
+async def process_fio(message: types.Message, state: FSMContext, bot: Bot):
+    await delete_prev_message(bot, message.chat.id, state)
     fio = await _extract_text(message)
     if fio is None:
         return
@@ -458,12 +530,14 @@ async def process_fio(message: types.Message, state: FSMContext):
         return
     await state.update_data(fio=fio)
     await state.set_state(AdmissionForm.phone)
-    await message.answer(FORM_FIO_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    sent = await message.answer(FORM_FIO_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    await track_message(sent, state)
 
 
 @router.message(AdmissionForm.phone)
 @safe_handler
-async def process_phone(message: types.Message, state: FSMContext):
+async def process_phone(message: types.Message, state: FSMContext, bot: Bot):
+    await delete_prev_message(bot, message.chat.id, state)
     phone = await _extract_text(message)
     if phone is None:
         return
@@ -472,7 +546,8 @@ async def process_phone(message: types.Message, state: FSMContext):
         return
     await state.update_data(phone=phone)
     await state.set_state(AdmissionForm.email)
-    await message.answer(FORM_PHONE_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    sent = await message.answer(FORM_PHONE_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    await track_message(sent, state)
 
 
 @router.message(AdmissionForm.email)
@@ -483,7 +558,10 @@ async def process_email(
     user_repository: UserRepository,
     bot: Bot,
     scheduler: AsyncIOScheduler,
+    webhook_service: WebhookService,
+    integration_service: IntegrationService,
 ):
+    await delete_prev_message(bot, message.chat.id, state)
     email = await _extract_text(message)
     if email is None:
         return
@@ -529,6 +607,19 @@ async def process_email(
         return
 
     logger.info("Анкета ДОД сохранена: user_id=%s, date=%s", user_id, open_day_date)
+    payload = {
+        "kind": "open_day",
+        "app_id": app_id,
+        "telegram_user_id": user_id,
+        "fio": fio,
+        "phone": phone,
+        "email": email,
+        "open_day_date": open_day_date,
+    }
+    if webhook_service.enabled:
+        asyncio.create_task(webhook_service.send_application(payload))
+    asyncio.create_task(integration_service.send_to_docflow(payload))
+
     schedule_open_day_reminders(
         scheduler,
         application_id=app_id,
@@ -556,7 +647,8 @@ async def process_email(
 
 @router.message(SpecialtyRequestForm.fio)
 @safe_handler
-async def process_specialty_fio(message: types.Message, state: FSMContext):
+async def process_specialty_fio(message: types.Message, state: FSMContext, bot: Bot):
+    await delete_prev_message(bot, message.chat.id, state)
     fio = await _extract_text(message)
     if fio is None:
         return
@@ -565,12 +657,14 @@ async def process_specialty_fio(message: types.Message, state: FSMContext):
         return
     await state.update_data(fio=fio)
     await state.set_state(SpecialtyRequestForm.phone)
-    await message.answer(FORM_FIO_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    sent = await message.answer(FORM_FIO_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    await track_message(sent, state)
 
 
 @router.message(SpecialtyRequestForm.phone)
 @safe_handler
-async def process_specialty_phone(message: types.Message, state: FSMContext):
+async def process_specialty_phone(message: types.Message, state: FSMContext, bot: Bot):
+    await delete_prev_message(bot, message.chat.id, state)
     phone = await _extract_text(message)
     if phone is None:
         return
@@ -579,12 +673,14 @@ async def process_specialty_phone(message: types.Message, state: FSMContext):
         return
     await state.update_data(phone=phone)
     await state.set_state(SpecialtyRequestForm.email)
-    await message.answer(FORM_PHONE_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    sent = await message.answer(FORM_PHONE_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    await track_message(sent, state)
 
 
 @router.message(SpecialtyRequestForm.email)
 @safe_handler
-async def process_specialty_email(message: types.Message, state: FSMContext):
+async def process_specialty_email(message: types.Message, state: FSMContext, bot: Bot):
+    await delete_prev_message(bot, message.chat.id, state)
     email = await _extract_text(message)
     if email is None:
         return
@@ -634,6 +730,8 @@ async def handle_test_answer(
     state: FSMContext,
     user_repository: UserRepository,
     bot: Bot,
+    webhook_service: WebhookService,
+    integration_service: IntegrationService,
 ):
     data = await state.get_data()
     score_a = int(data.get("score_a", 0))
@@ -670,8 +768,7 @@ async def handle_test_answer(
 
     user_id = callback.from_user.id
 
-    # Защита от дублей
-    is_dup = await user_repository.is_specialty_duplicate(user_id)
+    is_dup = await user_repository.is_specialty_duplicate(user_id, fio=fio)
     if is_dup:
         await state.clear()
         await safe_edit_text(
@@ -699,6 +796,19 @@ async def handle_test_answer(
         return
 
     logger.info("Тест завершен: user_id=%s, result=%s", user_id, result_key)
+    payload = {
+        "kind": "specialty",
+        "app_id": app_id,
+        "telegram_user_id": user_id,
+        "fio": fio,
+        "phone": phone,
+        "email": email,
+        "test_result": result_key,
+    }
+    if webhook_service.enabled:
+        asyncio.create_task(webhook_service.send_application(payload))
+    asyncio.create_task(integration_service.send_to_docflow(payload))
+
     await _notify_admin(
         bot,
         user_repository,
@@ -720,15 +830,15 @@ async def handle_test_answer(
 @router.callback_query(F.data == "specialty_restart", SpecialtyRequestForm.confirm)
 @safe_handler
 async def specialty_restart(callback: types.CallbackQuery, state: FSMContext):
-    """Повторный ввод анкеты (согласие уже в БД — сразу с ФИО)."""
+    """Повторный ввод анкеты (согласие уже в БД — заново через опрос)."""
     await state.clear()
     try:
         await callback.message.delete()
     except Exception:
         logger.info("specialty_restart: не удалось удалить предыдущее сообщение.", exc_info=True)
     await state.update_data(next_form="specialty")
-    await state.set_state(SpecialtyRequestForm.fio)
-    await callback.message.answer(FORM_ASK_FIO_SPECIALTY, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    await state.set_state(SurveyState.region)
+    await callback.message.answer(SURVEY_ASK_REGION, reply_markup=region_kb())
     await callback.answer()
 
 

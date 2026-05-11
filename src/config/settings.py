@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     # Текущая латентность > max(база_мс, медиана_последних_проб * ratio)
     WATCHDOG_DB_LATENCY_SPIKE_RATIO: float = 2.5
     WATCHDOG_WRITE_RETRIES_WARN_PER_HOUR: int = 25
+    # n8n webhook: POST с данными абитуриента после успешной регистрации (пусто = выключен)
+    N8N_WEBHOOK_URL: str = ""
+    N8N_WEBHOOK_TIMEOUT_SECONDS: int = 10
 
     model_config = SettingsConfigDict(
         env_file=".env",

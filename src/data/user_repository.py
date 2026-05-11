@@ -248,6 +248,36 @@ class UserRepository:
             f"save_consent user_id={user_id} form={ft}",
         )
 
+    # ─── Сохранённый профиль (для повторных заявок) ─────────────────────────
+
+    async def get_saved_profile(self, telegram_user_id: int) -> dict[str, str] | None:
+        """Возвращает сохранённые ФИО/телефон/email или None."""
+        try:
+            async with read_only_session(self._sessions()) as session:
+                row = await asyncio.wait_for(
+                    session.get(TelegramUser, telegram_user_id),
+                    timeout=5.0,
+                )
+            if row and row.saved_fio and row.saved_phone and row.saved_email:
+                return {
+                    "fio": row.saved_fio,
+                    "phone": row.saved_phone,
+                    "email": row.saved_email,
+                }
+            return None
+        except Exception:
+            logger.exception("get_saved_profile user_id=%s", telegram_user_id)
+            return None
+
+    async def _update_saved_profile(
+        self, session: AsyncSession, telegram_user_id: int, fio: str, phone: str, email: str
+    ) -> None:
+        await session.execute(
+            update(TelegramUser)
+            .where(TelegramUser.telegram_user_id == telegram_user_id)
+            .values(saved_fio=fio, saved_phone=phone, saved_email=email)
+        )
+
     # ─── Регистрация абитуриента (анткета + согласие одной транзакцией) ───────
 
     async def register_abiturient(
@@ -323,6 +353,7 @@ class UserRepository:
             session.add(app)
             await session.flush()
             result[0] = app.id
+            await self._update_saved_profile(session, telegram_user_id, fio, phone, email)
 
         ok = await self._transactional_writes_with_retry(
             body,
@@ -368,6 +399,7 @@ class UserRepository:
             session.add(rec)
             await session.flush()
             result[0] = rec.id
+            await self._update_saved_profile(session, telegram_user_id, fio, phone, email)
 
         ok = await self._transactional_writes_with_retry(
             body,
@@ -400,17 +432,17 @@ class UserRepository:
             logger.exception("Ошибка проверки дубля ДОД (user_id=%s)", telegram_user_id)
             return False
 
-    async def is_specialty_duplicate(self, telegram_user_id: int) -> bool:
+    async def is_specialty_duplicate(self, telegram_user_id: int, fio: str = "") -> bool:
         try:
             async with read_only_session(self._sessions()) as session:
-                count = await asyncio.wait_for(
-                    session.scalar(
-                        select(func.count())
-                        .select_from(SpecialtyRequest)
-                        .where(SpecialtyRequest.telegram_user_id == telegram_user_id)
-                    ),
-                    timeout=5.0,
+                query = (
+                    select(func.count())
+                    .select_from(SpecialtyRequest)
+                    .where(SpecialtyRequest.telegram_user_id == telegram_user_id)
                 )
+                if fio.strip():
+                    query = query.where(SpecialtyRequest.fio == fio.strip())
+                count = await asyncio.wait_for(session.scalar(query), timeout=5.0)
                 return (count or 0) > 0
         except asyncio.TimeoutError:
             logger.error(

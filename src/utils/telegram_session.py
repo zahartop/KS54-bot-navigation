@@ -45,11 +45,13 @@ def build_telegram_client_timeout(total_seconds: float) -> ClientTimeout:
 
 def create_bot_aiohttp_session(settings: Settings) -> AiohttpSession:
     total_seconds = float(max(30.0, settings.TELEGRAM_HTTP_TIMEOUT_SECONDS))
-    timeout = build_telegram_client_timeout(total_seconds)
+    client_timeout = build_telegram_client_timeout(total_seconds)
     proxy_raw = settings.TELEGRAM_PROXY.get_secret_value().strip()
     proxy = proxy_raw if proxy_raw else None
-    return _TelegramAiohttpSession(
+    session = _TelegramAiohttpSession(
         proxy=proxy,
-        timeout=timeout,
+        timeout=client_timeout,
         force_ipv4=settings.TELEGRAM_FORCE_IPV4,
     )
+    session.timeout = client_timeout.total
+    return session

@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -91,18 +91,29 @@ def run_migrations_offline() -> None:
 
 
 def _do_run_migrations(connection: Connection) -> None:
+    is_sqlite = connection.dialect.name == "sqlite"
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
+        render_as_batch=is_sqlite,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
-async def _run_async_migrations() -> None:
+def _run_sync_migrations(url: str) -> None:
+    """SQLite и другие синхронные драйверы."""
+    sync_url = url.replace("sqlite+aiosqlite:", "sqlite:", 1)
+    engine = create_engine(sync_url, poolclass=pool.NullPool)
+    with engine.connect() as connection:
+        _do_run_migrations(connection)
+    engine.dispose()
+
+
+async def _run_async_migrations(url: str) -> None:
     section = alembic_config.get_section(alembic_config.config_ini_section, {})
-    section["sqlalchemy.url"] = _get_url()
+    section["sqlalchemy.url"] = url
 
     engine = async_engine_from_config(
         section,
@@ -115,7 +126,11 @@ async def _run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    asyncio.run(_run_async_migrations())
+    url = _get_url()
+    if url.startswith("sqlite"):
+        _run_sync_migrations(url)
+    else:
+        asyncio.run(_run_async_migrations(url))
 
 
 # ─── Entry point ─────────────────────────────────────────────────────────────

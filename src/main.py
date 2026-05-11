@@ -22,6 +22,7 @@ from src.config.settings import Settings, get_settings
 from src.data.database import db_manager
 from src.data.user_repository import UserRepository
 from src.logic.abi.education_router import router as education_router
+from src.logic.abi.handlers.survey_handler import router as survey_router
 from src.logic.abi.main_menu_handler import router as main_menu_router
 from src.logic.admin.admin_broadcast_handler import router as admin_broadcast_router
 from src.logic.admin.admin_handler import router as admin_router
@@ -37,7 +38,9 @@ from src.monitoring.telegram_log_alerts import (
     set_alert_event_loop,
     start_alert_consumer_task,
 )
+from src.services.integrations import StubIntegrationService
 from src.services.scheduler_factory import build_async_scheduler
+from src.services.webhooks import WebhookService
 from src.utils.pii import PIIMaskingFilter, mask_for_log
 from src.utils.telegram_session import create_bot_aiohttp_session
 
@@ -192,6 +195,11 @@ async def _run_single_bot_session() -> None:
     )
     dp["user_repository"] = user_repository
     dp["admin_service"] = AdminService(user_repository)
+    dp["webhook_service"] = WebhookService(
+        settings.N8N_WEBHOOK_URL,
+        timeout_seconds=settings.N8N_WEBHOOK_TIMEOUT_SECONDS,
+    )
+    dp["integration_service"] = StubIntegrationService()
     policy_pdn_consent_mw = PolicyPdnConsentMiddleware()
     dp.message.middleware(policy_pdn_consent_mw)
     dp.callback_query.middleware(policy_pdn_consent_mw)
@@ -200,10 +208,11 @@ async def _run_single_bot_session() -> None:
     scheduler = build_async_scheduler(settings)
     dp["scheduler"] = scheduler
 
-    _included = (admin_broadcast_router, admin_router, education_router, main_menu_router)
+    _included = (admin_broadcast_router, admin_router, education_router, survey_router, main_menu_router)
     dp.include_router(admin_broadcast_router)
     dp.include_router(admin_router)
     dp.include_router(education_router)
+    dp.include_router(survey_router)
     dp.include_router(main_menu_router)
 
     dp.errors.register(_dispatch_error_logged)

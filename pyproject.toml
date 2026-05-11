@@ -16,6 +16,9 @@ select = ["E", "W", "F", "I"]
 [tool.ruff.lint.per-file-ignores]
 "src/main.py" = ["E402"]
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

@@ -48,6 +48,17 @@ def specialty_confirm_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def saved_profile_kb(saved_fio: str) -> InlineKeyboardMarkup:
+    """Выбор: использовать сохранённые данные или ввести новые."""
+    builder = InlineKeyboardBuilder()
+    label = f"📋 Использовать: {saved_fio}" if len(saved_fio) <= 40 else "📋 Использовать сохранённые"
+    builder.button(text=label, callback_data="use_saved_profile")
+    builder.button(text="✏️ Ввести новые данные", callback_data="new_profile")
+    builder.button(text=BTN_CANCEL_INPUT, callback_data="cancel_input")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def cancel_input_kb() -> InlineKeyboardMarkup:
     """Inline-кнопка выхода из режима ввода данных."""
     builder = InlineKeyboardBuilder()

@@ -21,6 +21,19 @@ logger = logging.getLogger(__name__)
 _CONSENT_CALLBACKS = frozenset({"consent_accept", "consent_reject"})
 _PUBLIC_COMMANDS = frozenset({"/start", "/help", "/about"})
 
+_GUEST_CALLBACKS = frozenset({
+    "about_college",
+    "college_history",
+    "how_to_apply",
+    "career_opportunities",
+    "contact_us",
+    "main_menu",
+})
+_GUEST_CALLBACK_PREFIXES = (
+    "edu_level:",
+    "edu_form:",
+)
+
 
 def _event_user(event: TelegramObject) -> types.User | None:
     if isinstance(event, Message):
@@ -102,6 +115,9 @@ class PolicyPdnConsentMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         cb_data = (event.data or "").strip()
+
+        if cb_data in _GUEST_CALLBACKS or any(cb_data.startswith(p) for p in _GUEST_CALLBACK_PREFIXES):
+            return await handler(event, data)
 
         if cb_data.startswith("open_day_date:"):
             sel = cb_data.split("open_day_date:", maxsplit=1)[1]
