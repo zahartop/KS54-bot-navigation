@@ -14,6 +14,7 @@ class AdmissionForm(StatesGroup):
     fio = State()
     phone = State()
     email = State()
+    role = State()
 
 
 class SurveyState(StatesGroup):
@@ -32,6 +33,12 @@ class SpecialtyRequestForm(StatesGroup):
     phone = State()
     email = State()
     confirm = State()
+
+
+class AppealForm(StatesGroup):
+    """Состояние формы обращения в приёмную комиссию."""
+
+    waiting_text = State()
 
 
 class TestState(StatesGroup):

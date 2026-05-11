@@ -11,6 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.config.content import (
+    CANCEL_MESSAGE,
     FORM_DB_TECHNICAL_ERROR,
     FORM_ERROR_EMAIL,
     FORM_ERROR_FIO,
@@ -22,6 +23,7 @@ from src.config.content import (
     SPECIALTY_SUCCESS,
     SURVEY_ASK_REGION,
     TEST_RESULTS,
+    WELCOME_MESSAGE,
 )
 from src.data.user_repository import UserRepository
 from src.logic.abi.handlers.shared import (
@@ -31,16 +33,30 @@ from src.logic.abi.handlers.shared import (
     is_valid_phone,
     notify_admin,
 )
-from src.logic.abi.keyboards.kb import back_to_main_menu_kb, cancel_input_kb, specialty_confirm_kb
+from src.logic.abi.keyboards.kb import (
+    REPLY_KB_REMOVE,
+    back_to_main_menu_kb,
+    cancel_input_kb,
+    phone_request_kb,
+    specialty_confirm_kb,
+)
 from src.logic.abi.keyboards.survey_kb import region_kb
 from src.logic.abi.states.admission_form import SpecialtyRequestForm, SurveyState, TestState
 from src.services.integrations import IntegrationService
 from src.services.webhooks import WebhookService
+from src.utils.keyboards import KeyboardFactory
 from src.utils.safe_handler import safe_handler
 from src.utils.ui_utils import delete_prev_message, safe_edit_text, track_message
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+
+async def _try_delete(message: types.Message) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 class TestAnswerCallback(CallbackData, prefix="test_answer"):
@@ -142,9 +158,10 @@ async def process_specialty_fio(message: types.Message, state: FSMContext, bot: 
     if not is_valid_fio(fio):
         await message.answer(FORM_ERROR_FIO, reply_markup=cancel_input_kb())
         return
+    await _try_delete(message)
     await state.update_data(fio=fio)
     await state.set_state(SpecialtyRequestForm.phone)
-    sent = await message.answer(FORM_FIO_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    sent = await message.answer(FORM_FIO_ACCEPTED, reply_markup=phone_request_kb(), parse_mode="HTML")
     await track_message(sent, state)
 
 
@@ -152,15 +169,32 @@ async def process_specialty_fio(message: types.Message, state: FSMContext, bot: 
 @safe_handler
 async def process_specialty_phone(message: types.Message, state: FSMContext, bot: Bot):
     await delete_prev_message(bot, message.chat.id, state)
-    phone = await extract_text(message)
+
+    if message.text and message.text.strip() == "Отмена ❌":
+        await state.clear()
+        await message.answer(CANCEL_MESSAGE, reply_markup=REPLY_KB_REMOVE)
+        await message.answer(
+            WELCOME_MESSAGE,
+            reply_markup=KeyboardFactory.create_main_menu_keyboard(),
+            parse_mode="HTML",
+        )
+        return
+
+    phone: str | None = None
+    if message.contact:
+        phone = message.contact.phone_number
+    else:
+        phone = await extract_text(message)
+
     if phone is None:
         return
     if not is_valid_phone(phone):
-        await message.answer(FORM_ERROR_PHONE, reply_markup=cancel_input_kb())
+        await message.answer(FORM_ERROR_PHONE, reply_markup=phone_request_kb())
         return
+    await _try_delete(message)
     await state.update_data(phone=phone)
     await state.set_state(SpecialtyRequestForm.email)
-    sent = await message.answer(FORM_PHONE_ACCEPTED, reply_markup=cancel_input_kb(), parse_mode="HTML")
+    sent = await message.answer(FORM_PHONE_ACCEPTED, reply_markup=REPLY_KB_REMOVE, parse_mode="HTML")
     await track_message(sent, state)
 
 
@@ -174,6 +208,7 @@ async def process_specialty_email(message: types.Message, state: FSMContext, bot
     if not is_valid_email(email):
         await message.answer(FORM_ERROR_EMAIL, reply_markup=cancel_input_kb())
         return
+    await _try_delete(message)
 
     await state.update_data(email=email)
     data = await state.get_data()

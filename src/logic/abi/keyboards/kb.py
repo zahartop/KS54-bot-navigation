@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.config.content import (
@@ -15,6 +20,8 @@ from src.config.content import (
     OPEN_DAY_DATES,
     POLICY_URL,
 )
+
+REPLY_KB_REMOVE = ReplyKeyboardRemove()
 
 
 def dates_kb() -> InlineKeyboardMarkup:
@@ -61,6 +68,38 @@ def saved_profile_kb(saved_fio: str) -> InlineKeyboardMarkup:
 
 def cancel_input_kb() -> InlineKeyboardMarkup:
     """Inline-кнопка выхода из режима ввода данных."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=BTN_CANCEL_INPUT, callback_data="cancel_input")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def phone_request_kb() -> ReplyKeyboardMarkup:
+    """ReplyKeyboard с кнопкой отправки контакта для получения номера телефона."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Отправить номер телефона", request_contact=True)],
+            [KeyboardButton(text="Отмена ❌")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def dod_role_kb() -> InlineKeyboardMarkup:
+    """Выбор роли при записи на День открытых дверей."""
+    from src.config.content import DOD_ROLE_LABELS
+
+    builder = InlineKeyboardBuilder()
+    for key, label in DOD_ROLE_LABELS.items():
+        builder.button(text=label, callback_data=f"dod_role:{key}")
+    builder.button(text=BTN_CANCEL_INPUT, callback_data="cancel_input")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def appeal_cancel_kb() -> InlineKeyboardMarkup:
+    """Кнопка отмены при вводе обращения."""
     builder = InlineKeyboardBuilder()
     builder.button(text=BTN_CANCEL_INPUT, callback_data="cancel_input")
     builder.adjust(1)

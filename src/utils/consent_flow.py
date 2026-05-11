@@ -22,20 +22,23 @@ from src.utils.ui_utils import safe_edit_text
 _POLICY_PATH = Path(__file__).resolve().parents[2] / "policy.pdf"
 
 
-async def show_consent_screen(callback: types.CallbackQuery) -> None:
+async def show_consent_screen(callback: types.CallbackQuery, state: FSMContext | None = None) -> None:
     """Сначала текст с кнопками, затем PDF политики (если файл есть в образе/проекте)."""
     if callback.message is None:
         return
     kb = get_consent_kb()
     await callback.message.answer(CONSENT_TEXT, reply_markup=kb, parse_mode="HTML")
     if _POLICY_PATH.exists():
-        await callback.message.answer_document(FSInputFile(_POLICY_PATH))
+        doc_msg = await callback.message.answer_document(FSInputFile(_POLICY_PATH))
+        if state:
+            await state.update_data(_policy_doc_msg_id=doc_msg.message_id)
 
 
 async def send_consent_screen_for_message(
     message: types.Message,
     *,
     reminder_only_text: str | None = None,
+    state: FSMContext | None = None,
 ) -> None:
     """Отправить политику в чат как ответ на сообщение; при напоминании — только короткий текст."""
     if reminder_only_text:
@@ -44,7 +47,9 @@ async def send_consent_screen_for_message(
     kb = get_consent_kb()
     await message.answer(CONSENT_TEXT, reply_markup=kb, parse_mode="HTML")
     if _POLICY_PATH.exists():
-        await message.answer_document(FSInputFile(_POLICY_PATH))
+        doc_msg = await message.answer_document(FSInputFile(_POLICY_PATH))
+        if state:
+            await state.update_data(_policy_doc_msg_id=doc_msg.message_id)
 
 
 async def enter_open_day_form_after_policy(

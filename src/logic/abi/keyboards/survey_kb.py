@@ -32,3 +32,23 @@ def specialty_kb(grade: str) -> InlineKeyboardMarkup:
         builder.row(InlineKeyboardButton(text=label, callback_data=f"survey_spec:{key}"))
     builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="survey_back_grade"))
     return builder.as_markup()
+
+
+# ─── Info-flow: Специальности (read-only) ────────────────────────────
+
+
+def info_region_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="Москва", callback_data="info_region:moscow"))
+    builder.row(InlineKeyboardButton(text="Московская область", callback_data="info_region:mo"))
+    builder.row(InlineKeyboardButton(text="Другой регион", callback_data="info_region:other"))
+    builder.row(InlineKeyboardButton(text="🏠 В главное меню", callback_data="main_menu"))
+    return builder.as_markup()
+
+
+def info_grade_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="После 9 класса", callback_data="info_grade:9_class"))
+    builder.row(InlineKeyboardButton(text="После 11 класса", callback_data="info_grade:11_class"))
+    builder.row(InlineKeyboardButton(text="⬅️ Назад", callback_data="specialties_info"))
+    return builder.as_markup()

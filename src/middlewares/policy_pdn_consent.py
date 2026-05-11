@@ -28,10 +28,15 @@ _GUEST_CALLBACKS = frozenset({
     "career_opportunities",
     "contact_us",
     "main_menu",
+    "specialties_info",
+    "personal_cabinet",
+    "compose_appeal",
 })
 _GUEST_CALLBACK_PREFIXES = (
     "edu_level:",
     "edu_form:",
+    "info_region:",
+    "info_grade:",
 )
 
 
@@ -125,7 +130,7 @@ class PolicyPdnConsentMiddleware(BaseMiddleware):
             await state.set_state(ConsentState.waiting)
             if event.message:
                 await safe_edit_text(event.message, OPEN_DAY_DATE_CHOSEN.format(date=sel), parse_mode="HTML")
-            await show_consent_screen(event)
+            await show_consent_screen(event, state=state)
             await event.answer()
             return None
 
@@ -133,7 +138,7 @@ class PolicyPdnConsentMiddleware(BaseMiddleware):
             await state.clear()
             await state.update_data(next_form="specialty")
             await state.set_state(ConsentState.waiting)
-            await show_consent_screen(event)
+            await show_consent_screen(event, state=state)
             await event.answer()
             return None
 
@@ -151,7 +156,7 @@ class PolicyPdnConsentMiddleware(BaseMiddleware):
         await state.clear()
         await state.update_data(next_form=NEXT_FORM_AFTER_CONSENT_BROWSE)
         await state.set_state(ConsentState.waiting)
-        await send_consent_screen_for_message(event)
+        await send_consent_screen_for_message(event, state=state)
         return None
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import F, Router, types
+from aiogram import Bot, F, Router, types
 from aiogram.fsm.context import FSMContext
 
 from src.config.content import (
@@ -35,17 +35,30 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+async def _delete_policy_doc(bot: Bot, chat_id: int, state: FSMContext) -> None:
+    data = await state.get_data()
+    doc_msg_id = data.get("_policy_doc_msg_id")
+    if doc_msg_id:
+        try:
+            await bot.delete_message(chat_id, doc_msg_id)
+        except Exception:
+            logger.debug("Не удалось удалить PDF политики (msg_id=%s)", doc_msg_id)
+
+
 @router.callback_query(F.data == "consent_accept", ConsentState.waiting)
 @safe_handler
 async def consent_accept(
     callback: types.CallbackQuery,
     state: FSMContext,
     user_repository: UserRepository,
+    bot: Bot,
 ):
     data = await state.get_data()
     next_form = data.get("next_form")
     user_id = callback.from_user.id
     logger.info("Согласие на ПДн получено: user_id=%s, form=%s", user_id, next_form)
+
+    await _delete_policy_doc(bot, callback.message.chat.id, state)
 
     if not await user_repository.mark_policy_accepted(user_id):
         await callback.message.answer(
@@ -96,7 +109,8 @@ async def consent_accept(
 
 @router.callback_query(F.data == "consent_reject", ConsentState.waiting)
 @safe_handler
-async def consent_reject(callback: types.CallbackQuery, state: FSMContext):
+async def consent_reject(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+    await _delete_policy_doc(bot, callback.message.chat.id, state)
     await state.clear()
     logger.info("Согласие на ПДн отклонено: user_id=%s", callback.from_user.id)
     try:

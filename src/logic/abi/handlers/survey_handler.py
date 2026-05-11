@@ -12,6 +12,7 @@ from aiogram.fsm.context import FSMContext
 
 from src.config.content import (
     FORM_ASK_FIO_SPECIALTY,
+    GRADE_TITLES,
     SAVED_PROFILE_PROMPT,
     SURVEY_ASK_GRADE,
     SURVEY_ASK_REGION,
@@ -21,7 +22,13 @@ from src.config.content import (
 )
 from src.data.user_repository import UserRepository
 from src.logic.abi.keyboards.kb import cancel_input_kb, saved_profile_kb
-from src.logic.abi.keyboards.survey_kb import grade_kb, region_kb, specialty_kb
+from src.logic.abi.keyboards.survey_kb import (
+    grade_kb,
+    info_grade_kb,
+    info_region_kb,
+    region_kb,
+    specialty_kb,
+)
 from src.logic.abi.states.admission_form import SpecialtyRequestForm, SurveyState
 from src.utils.safe_handler import safe_handler
 from src.utils.ui_utils import safe_edit_text
@@ -33,6 +40,7 @@ logger = logging.getLogger(__name__)
 @router.callback_query(F.data == "find_specialty")
 @safe_handler
 async def start_survey(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer("Загружаю опрос...")
     logger.info("Старт опроса подбора специальности: user_id=%s", callback.from_user.id)
     await state.clear()
     await state.update_data(next_form="specialty")
@@ -42,7 +50,6 @@ async def start_survey(callback: types.CallbackQuery, state: FSMContext):
         SURVEY_ASK_REGION,
         reply_markup=region_kb(),
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("survey_region:"), SurveyState.region)
@@ -134,6 +141,8 @@ async def survey_specialty_selected(
         spec_key,
     )
 
+    await callback.answer("Загружаю анкету...")
+
     await state.update_data(
         survey_specialty_key=spec_key,
         survey_specialty_label=spec_label,
@@ -158,4 +167,48 @@ async def survey_specialty_selected(
             reply_markup=cancel_input_kb(),
             parse_mode="HTML",
         )
+
+
+# ─── Info-flow: Специальности (read-only, без анкеты) ────────────────
+
+
+@router.callback_query(F.data == "specialties_info")
+@safe_handler
+async def info_specialties_start(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer("Загружаю...")
+    await state.clear()
+    await safe_edit_text(
+        callback.message,
+        SURVEY_ASK_REGION,
+        reply_markup=info_region_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("info_region:"))
+@safe_handler
+async def info_region_selected(callback: types.CallbackQuery, state: FSMContext):
+    region = callback.data.split("info_region:", maxsplit=1)[1]
+
+    if region == "other":
+        await safe_edit_text(callback.message, SURVEY_OTHER_REGION, parse_mode="HTML")
+        await callback.answer()
+        return
+
+    await safe_edit_text(
+        callback.message,
+        SURVEY_ASK_GRADE,
+        reply_markup=info_grade_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("info_grade:"))
+@safe_handler
+async def info_grade_selected(callback: types.CallbackQuery, state: FSMContext):
+    grade = callback.data.split("info_grade:", maxsplit=1)[1]
+    title = GRADE_TITLES.get(grade, "Уровень обучения")
+
+    from src.logic.abi.education_router import _forms_keyboard
+
+    await safe_edit_text(callback.message, title, reply_markup=_forms_keyboard(grade))
     await callback.answer()

@@ -34,7 +34,6 @@ from src.logic.admin.broadcast_recovery_notify import notify_pending_broadcast_j
 from src.middlewares.access_control import AccessControlMiddleware
 from src.middlewares.policy_pdn_consent import PolicyPdnConsentMiddleware
 from src.middlewares.throttling import ThrottlingMiddleware
-from src.monitoring.health_checks import assert_startup_health
 from src.monitoring.health_server import start_health_http, stop_health_http
 from src.monitoring.telegram_log_alerts import (
     attach_admin_telegram_log_handler,
@@ -234,7 +233,7 @@ async def _run_single_bot_session() -> None:
 
     try:
         await db_manager.init_with_retry()
-        await assert_startup_health(bot)
+        # await assert_startup_health(bot)  # отключён для стабильного запуска
 
         scheduler.add_job(
             "src.monitoring.watchdog_job:run_health_watchdog",

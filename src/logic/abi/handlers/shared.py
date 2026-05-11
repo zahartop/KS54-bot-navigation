@@ -43,7 +43,9 @@ def is_valid_email(email: str) -> bool:
 
         result = validate_email(email, check_deliverability=False)
         tld = result.ascii_domain.rsplit(".", 1)[-1].lower()
-        return tld not in _TYPO_TLDS
+        if len(tld) < 2 or tld in _TYPO_TLDS:
+            return False
+        return True
     except EmailNotValidError:
         return False
 
