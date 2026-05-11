@@ -1,8 +1,12 @@
 import pytest
-from src.logic.abi.main_menu_handler import (
-    _is_valid_email,
-    _is_valid_fio,
-    _is_valid_phone,
+from src.logic.abi.handlers.shared import (
+    is_valid_email as _is_valid_email,
+)
+from src.logic.abi.handlers.shared import (
+    is_valid_fio as _is_valid_fio,
+)
+from src.logic.abi.handlers.shared import (
+    is_valid_phone as _is_valid_phone,
 )
 
 

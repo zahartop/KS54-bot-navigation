@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 from aiogram.fsm.context import FSMContext
 from src.config.content import HELP_MESSAGE, WELCOME_MESSAGE
-from src.logic.abi.main_menu_handler import cmd_help, cmd_start
+from src.logic.abi.handlers.menu_handler import cmd_help, cmd_start
 from src.utils.keyboards import KeyboardFactory
 
 

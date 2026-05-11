@@ -2,43 +2,68 @@ name: DevSecOps Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  check-and-test:
+  lint:
+    name: Lint (Ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: pip
+      - run: pip install ruff
+      - run: ruff check .
 
+  test:
+    name: Tests (pytest)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
       - name: Install dependencies
         run: |
-          pip install ruff pytest pytest-asyncio
           pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
 
-      # 1. Сначала линтер (то, что Cursor только что поправил)
-      - name: Lint with Ruff
-        run: ruff check .
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
 
-      # 2. Теперь тесты (тот самый Test-Gate)
-      - name: Run Tests
-        run: pytest
-
-      # 3. Безопасность (Gitleaks)
-      - name: Gitleaks Scan
+      - name: Gitleaks (secret scan)
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Build image for Trivy
+        run: docker build -t college-bot:ci .
+
+      - name: Trivy (image vulnerabilities)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: college-bot:ci
+          format: table
+          exit-code: 0
+          severity: CRITICAL,HIGH
+
   deploy:
-    needs: check-and-test
+    name: Deploy to Production
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    needs: [test, security]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
