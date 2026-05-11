@@ -1,12 +1,50 @@
-name: Deploy Bot
+name: DevSecOps Pipeline
 
 on:
   push:
     branches:
-      - main
+      - main  # Срабатывает при пуше в основную ветку
 
 jobs:
+  check-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 1. Проверка на утечку секретов (токены, пароли)
+      - name: Gitleaks Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 2. Настройка Python и проверка Ruff
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Lint with Ruff
+        run: ruff check . # Остановит деплой, если найдет ошибки
+
+      # 3. Сканирование Docker-образа на уязвимости
+      - name: Build image for scan
+        run: docker build -t my-bot:test .
+
+      - name: Security Scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'my-bot:test'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
   deploy:
+    needs: check-and-test # ЗАПУСТИТСЯ ТОЛЬКО ЕСЛИ ВСЕ ПРОВЕРКИ ПРОШЛИ
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
@@ -19,3 +57,4 @@ jobs:
             cd ks54_bot
             git pull origin main
             docker compose up -d --build
+            docker image prune -f 

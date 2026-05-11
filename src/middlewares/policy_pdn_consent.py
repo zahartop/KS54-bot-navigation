@@ -88,7 +88,7 @@ class PolicyPdnConsentMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         if isinstance(event, CallbackQuery):
-            return await self._handle_callback_blocked(handler, event, state)
+            return await self._handle_callback_blocked(handler, event, state, data)
 
         assert isinstance(event, Message)
         if _is_public_command_message(event):
@@ -100,6 +100,7 @@ class PolicyPdnConsentMiddleware(BaseMiddleware):
         handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
         event: CallbackQuery,
         state: FSMContext,
+        data: dict[str, Any],
     ) -> Any:
         cb_data = (event.data or "").strip()
 
