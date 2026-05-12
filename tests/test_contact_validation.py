@@ -8,6 +8,9 @@ from src.logic.abi.handlers.shared import (
 from src.logic.abi.handlers.shared import (
     is_valid_phone as _is_valid_phone,
 )
+from src.logic.abi.handlers.shared import (
+    normalize_phone as _normalize_phone,
+)
 
 
 @pytest.mark.parametrize(
@@ -91,3 +94,23 @@ def test_email_validation_accepts_standard_addresses(email: str) -> None:
 )
 def test_email_validation_rejects_invalid_addresses(email: str) -> None:
     assert _is_valid_email(email) is False
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("+79991234567", "+79991234567"),
+        ("89991234567", "+79991234567"),
+        ("79991234567", "+79991234567"),
+        ("9991234567", "+79991234567"),
+        ("+7 (999) 123-45-67", "+79991234567"),
+        ("8 (999) 123-45-67", "+79991234567"),
+    ],
+)
+def test_normalize_phone_converts_to_plus7_format(raw: str, expected: str) -> None:
+    assert _normalize_phone(raw) == expected
+
+
+def test_normalize_phone_returns_raw_for_unrecognized_format() -> None:
+    assert _normalize_phone("abc") == "abc"
+    assert _normalize_phone("123") == "123"

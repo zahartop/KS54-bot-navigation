@@ -6,6 +6,7 @@ import asyncio
 import logging
 
 from aiogram import Bot, F, Router, types
+from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -14,6 +15,7 @@ from src.config.content import (
     CANCEL_MESSAGE,
     DOD_ASK_ROLE,
     DOD_ROLE_LABELS,
+    FINAL_PD_CONSENT_TEXT,
     FORM_DB_TECHNICAL_ERROR,
     FORM_ERROR_EMAIL,
     FORM_ERROR_FIO,
@@ -32,6 +34,7 @@ from src.logic.abi.handlers.shared import (
     is_valid_email,
     is_valid_fio,
     is_valid_phone,
+    normalize_phone,
     notify_admin,
 )
 from src.logic.abi.keyboards.kb import (
@@ -40,6 +43,7 @@ from src.logic.abi.keyboards.kb import (
     cancel_input_kb,
     dates_kb,
     dod_role_kb,
+    final_consent_kb,
     phone_request_kb,
 )
 from src.logic.abi.states.admission_form import AdmissionForm
@@ -122,7 +126,7 @@ async def process_fio(message: types.Message, state: FSMContext, bot: Bot):
     await track_message(sent, state)
 
 
-@router.message(AdmissionForm.phone)
+@router.message(AdmissionForm.phone, F.content_type.in_({ContentType.TEXT, ContentType.CONTACT}))
 @safe_handler
 async def process_phone(message: types.Message, state: FSMContext, bot: Bot):
     await delete_prev_message(bot, message.chat.id, state)
@@ -137,14 +141,15 @@ async def process_phone(message: types.Message, state: FSMContext, bot: Bot):
         )
         return
 
-    phone: str | None = None
+    raw_phone: str | None = None
     if message.contact:
-        phone = message.contact.phone_number
+        raw_phone = message.contact.phone_number
     else:
-        phone = await extract_text(message)
+        raw_phone = await extract_text(message)
 
-    if phone is None:
+    if raw_phone is None:
         return
+    phone = normalize_phone(raw_phone)
     if not is_valid_phone(phone):
         await message.answer(FORM_ERROR_PHONE, reply_markup=phone_request_kb())
         return
@@ -173,7 +178,23 @@ async def process_email(message: types.Message, state: FSMContext, bot: Bot):
 
 @router.callback_query(F.data.startswith("dod_role:"), AdmissionForm.role)
 @safe_handler
-async def process_role(
+async def process_role(callback: types.CallbackQuery, state: FSMContext):
+    role_key = callback.data.split("dod_role:", maxsplit=1)[1]
+    role_label = DOD_ROLE_LABELS.get(role_key, role_key)
+    await state.update_data(role=role_label)
+    await state.set_state(AdmissionForm.pd_consent)
+    await safe_edit_text(
+        callback.message,
+        FINAL_PD_CONSENT_TEXT,
+        reply_markup=final_consent_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "final_consent_accept", AdmissionForm.pd_consent)
+@safe_handler
+async def dod_consent_accept(
     callback: types.CallbackQuery,
     state: FSMContext,
     user_repository: UserRepository,
@@ -182,17 +203,14 @@ async def process_role(
     webhook_service: WebhookService,
     integration_service: IntegrationService,
 ):
-    role_key = callback.data.split("dod_role:", maxsplit=1)[1]
-    role_label = DOD_ROLE_LABELS.get(role_key, role_key)
-    await state.update_data(role=role_label)
-
     data = await state.get_data()
     fio = data.get("fio")
     phone = data.get("phone")
     email = data.get("email")
     open_day_date = data.get("open_day_date")
+    role_label = data.get("role")
 
-    if not fio or not phone or not email or not open_day_date:
+    if not fio or not phone or not email or not open_day_date or not role_label:
         await state.clear()
         await callback.message.answer(FORM_ERROR_SESSION)
         await callback.answer()
@@ -212,6 +230,8 @@ async def process_role(
         await callback.answer()
         return
 
+    await user_repository.mark_policy_accepted(user_id)
+
     app_id = await user_repository.register_abiturient(
         {
             "kind": "open_day",
@@ -228,7 +248,7 @@ async def process_role(
         await callback.answer()
         return
 
-    logger.info("Анкета ДОД сохранена: user_id=%s, date=%s, role=%s", user_id, open_day_date, role_key)
+    logger.info("Анкета ДОД сохранена: user_id=%s, date=%s, role=%s", user_id, open_day_date, role_label)
     payload = {
         "kind": "open_day",
         "app_id": app_id,
@@ -269,4 +289,17 @@ async def process_role(
         parse_mode="HTML",
     )
     await state.clear()
+    await callback.answer()
+
+
+@router.callback_query(F.data == "final_consent_reject", AdmissionForm.pd_consent)
+@safe_handler
+async def dod_consent_reject(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await safe_edit_text(
+        callback.message,
+        BACK_TO_MENU_MESSAGE,
+        reply_markup=KeyboardFactory.create_main_menu_keyboard(),
+        parse_mode="HTML",
+    )
     await callback.answer()

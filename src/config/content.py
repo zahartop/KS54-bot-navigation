@@ -7,7 +7,7 @@ from __future__ import annotations
 
 # ─── Project Identity ────────────────────────────────────────────────────────
 
-APP_VERSION = "Admission Bot v2.3.0 — Feature Complete MVP by Zahar Bannykh"
+APP_VERSION = "Admission Bot v2.3.1 — Production Polish by Zahar Bannykh"
 APP_FOOTER = f"\n\n<code>{APP_VERSION}</code>"
 
 # ─── Главное меню / Welcome ───────────────────────────────────────────────────
@@ -55,6 +55,17 @@ CONSENT_TEXT = (
 CONSENT_PENDING_ALERT = (
     "Сначала подтвердите согласие на обработку персональных данных кнопками в сообщении с политикой 👆"
 )
+
+FINAL_PD_CONSENT_TEXT = (
+    "Нажимая кнопку «✅ Согласен», вы даете согласие ГБПОУ КМБ №54 "
+    "на обработку предоставленных данных для регистрации и обратной связи.\n\n"
+    "Ознакомиться с официальным положением об обработке ПДн можно на сайте: "
+    "https://ks54.mskobr.ru/info_add/personal_data\n\n"
+    "Вы подтверждаете согласие?"
+)
+
+BTN_FINAL_CONSENT_ACCEPT = "✅ Согласен"
+BTN_FINAL_CONSENT_REJECT = "❌ Отмена"
 
 # После общего согласия (не ДОД/специальность) показать главное меню см. consent_accept в consent_handler
 NEXT_FORM_AFTER_CONSENT_BROWSE = "browse_only"

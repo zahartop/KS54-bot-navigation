@@ -15,6 +15,7 @@ class AdmissionForm(StatesGroup):
     phone = State()
     email = State()
     role = State()
+    pd_consent = State()
 
 
 class SurveyState(StatesGroup):
@@ -33,6 +34,7 @@ class SpecialtyRequestForm(StatesGroup):
     phone = State()
     email = State()
     confirm = State()
+    pd_consent = State()
 
 
 class AppealForm(StatesGroup):

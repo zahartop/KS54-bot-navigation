@@ -13,6 +13,8 @@ from src.config.content import (
     BTN_CANCEL_INPUT,
     BTN_CONSENT_ACCEPT,
     BTN_CONSENT_REJECT,
+    BTN_FINAL_CONSENT_ACCEPT,
+    BTN_FINAL_CONSENT_REJECT,
     BTN_MAIN_MENU,
     BTN_PRIVACY_POLICY,
     BTN_SPECIALTY_CONFIRM,
@@ -102,6 +104,15 @@ def appeal_cancel_kb() -> InlineKeyboardMarkup:
     """Кнопка отмены при вводе обращения."""
     builder = InlineKeyboardBuilder()
     builder.button(text=BTN_CANCEL_INPUT, callback_data="cancel_input")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def final_consent_kb() -> InlineKeyboardMarkup:
+    """Клавиатура финального согласия на обработку ПДн перед сохранением анкеты."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=BTN_FINAL_CONSENT_ACCEPT, callback_data="final_consent_accept")
+    builder.button(text=BTN_FINAL_CONSENT_REJECT, callback_data="final_consent_reject")
     builder.adjust(1)
     return builder.as_markup()
 

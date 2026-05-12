@@ -9,16 +9,18 @@ from aiogram import BaseMiddleware, types
 from aiogram.enums import MessageEntityType
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject
-from src.config.content import CONSENT_PENDING_ALERT, NEXT_FORM_AFTER_CONSENT_BROWSE, OPEN_DAY_DATE_CHOSEN
+from src.config.content import CONSENT_PENDING_ALERT, NEXT_FORM_AFTER_CONSENT_BROWSE
 from src.data.user_repository import UserRepository
 from src.logic.abi.states.admission_form import ConsentState
 from src.utils.admin_guard import user_is_bot_admin
-from src.utils.consent_flow import send_consent_screen_for_message, show_consent_screen
-from src.utils.ui_utils import safe_edit_text
+from src.utils.consent_flow import send_consent_screen_for_message
 
 logger = logging.getLogger(__name__)
 
-_CONSENT_CALLBACKS = frozenset({"consent_accept", "consent_reject"})
+_CONSENT_CALLBACKS = frozenset({
+    "consent_accept", "consent_reject",
+    "final_consent_accept", "final_consent_reject",
+})
 _PUBLIC_COMMANDS = frozenset({"/start", "/help", "/about"})
 
 _GUEST_CALLBACKS = frozenset({
@@ -31,12 +33,21 @@ _GUEST_CALLBACKS = frozenset({
     "specialties_info",
     "personal_cabinet",
     "compose_appeal",
+    "open_day",
+    "open_day_back",
 })
 _GUEST_CALLBACK_PREFIXES = (
     "edu_level:",
     "edu_form:",
     "info_region:",
     "info_grade:",
+)
+
+_FORM_STATE_PREFIXES = (
+    "AdmissionForm:",
+    "SpecialtyRequestForm:",
+    "SurveyState:",
+    "TestState:",
 )
 
 
@@ -104,6 +115,10 @@ class PolicyPdnConsentMiddleware(BaseMiddleware):
         if isinstance(event, CallbackQuery) and ((event.data or "").strip() in _CONSENT_CALLBACKS):
             return await handler(event, data)
 
+        current_state = await state.get_state()
+        if current_state and any(current_state.startswith(p) for p in _FORM_STATE_PREFIXES):
+            return await handler(event, data)
+
         if isinstance(event, CallbackQuery):
             return await self._handle_callback_blocked(handler, event, state, data)
 
@@ -124,23 +139,8 @@ class PolicyPdnConsentMiddleware(BaseMiddleware):
         if cb_data in _GUEST_CALLBACKS or any(cb_data.startswith(p) for p in _GUEST_CALLBACK_PREFIXES):
             return await handler(event, data)
 
-        if cb_data.startswith("open_day_date:"):
-            sel = cb_data.split("open_day_date:", maxsplit=1)[1]
-            await state.update_data(open_day_date=sel, next_form="open_day")
-            await state.set_state(ConsentState.waiting)
-            if event.message:
-                await safe_edit_text(event.message, OPEN_DAY_DATE_CHOSEN.format(date=sel), parse_mode="HTML")
-            await show_consent_screen(event, state=state)
-            await event.answer()
-            return None
-
-        if cb_data == "find_specialty":
-            await state.clear()
-            await state.update_data(next_form="specialty")
-            await state.set_state(ConsentState.waiting)
-            await show_consent_screen(event, state=state)
-            await event.answer()
-            return None
+        if cb_data.startswith("open_day_date:") or cb_data == "find_specialty":
+            return await handler(event, data)
 
         if await state.get_state() == ConsentState.waiting.state:
             await event.answer(CONSENT_PENDING_ALERT, show_alert=True)

@@ -6,12 +6,15 @@ import asyncio
 import logging
 
 from aiogram import Bot, F, Router, types
+from aiogram.enums import ContentType
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from src.config.content import (
+    BACK_TO_MENU_MESSAGE,
     CANCEL_MESSAGE,
+    FINAL_PD_CONSENT_TEXT,
     FORM_DB_TECHNICAL_ERROR,
     FORM_ERROR_EMAIL,
     FORM_ERROR_FIO,
@@ -31,12 +34,14 @@ from src.logic.abi.handlers.shared import (
     is_valid_email,
     is_valid_fio,
     is_valid_phone,
+    normalize_phone,
     notify_admin,
 )
 from src.logic.abi.keyboards.kb import (
     REPLY_KB_REMOVE,
     back_to_main_menu_kb,
     cancel_input_kb,
+    final_consent_kb,
     phone_request_kb,
     specialty_confirm_kb,
 )
@@ -165,7 +170,7 @@ async def process_specialty_fio(message: types.Message, state: FSMContext, bot: 
     await track_message(sent, state)
 
 
-@router.message(SpecialtyRequestForm.phone)
+@router.message(SpecialtyRequestForm.phone, F.content_type.in_({ContentType.TEXT, ContentType.CONTACT}))
 @safe_handler
 async def process_specialty_phone(message: types.Message, state: FSMContext, bot: Bot):
     await delete_prev_message(bot, message.chat.id, state)
@@ -180,14 +185,15 @@ async def process_specialty_phone(message: types.Message, state: FSMContext, bot
         )
         return
 
-    phone: str | None = None
+    raw_phone: str | None = None
     if message.contact:
-        phone = message.contact.phone_number
+        raw_phone = message.contact.phone_number
     else:
-        phone = await extract_text(message)
+        raw_phone = await extract_text(message)
 
-    if phone is None:
+    if raw_phone is None:
         return
+    phone = normalize_phone(raw_phone)
     if not is_valid_phone(phone):
         await message.answer(FORM_ERROR_PHONE, reply_markup=phone_request_kb())
         return
@@ -250,10 +256,6 @@ async def handle_test_answer(
     callback: types.CallbackQuery,
     callback_data: TestAnswerCallback,
     state: FSMContext,
-    user_repository: UserRepository,
-    bot: Bot,
-    webhook_service: WebhookService,
-    integration_service: IntegrationService,
 ):
     data = await state.get_data()
     score_a = int(data.get("score_a", 0))
@@ -275,19 +277,41 @@ async def handle_test_answer(
         await callback.answer()
         return
 
-    await state.set_state(TestState.show_result)
     result_key = _detect_test_result(score_a, score_b, score_c)
-    result_text = TEST_RESULTS[result_key]
+    await state.update_data(test_result_key=result_key)
+    await state.set_state(SpecialtyRequestForm.pd_consent)
+    await safe_edit_text(
+        callback.message,
+        FINAL_PD_CONSENT_TEXT,
+        reply_markup=final_consent_kb(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
 
+
+@router.callback_query(F.data == "final_consent_accept", SpecialtyRequestForm.pd_consent)
+@safe_handler
+async def spec_consent_accept(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    user_repository: UserRepository,
+    bot: Bot,
+    webhook_service: WebhookService,
+    integration_service: IntegrationService,
+):
+    data = await state.get_data()
     fio = data.get("fio")
     phone = data.get("phone")
     email = data.get("email")
-    if not fio or not phone or not email:
+    result_key = data.get("test_result_key")
+
+    if not fio or not phone or not email or not result_key:
         await state.clear()
         await safe_edit_text(callback.message, FORM_ERROR_SESSION)
         await callback.answer()
         return
 
+    result_text = TEST_RESULTS[result_key]
     user_id = callback.from_user.id
 
     is_dup = await user_repository.is_specialty_duplicate(user_id, fio=fio)
@@ -301,6 +325,8 @@ async def handle_test_answer(
         )
         await callback.answer()
         return
+
+    await user_repository.mark_policy_accepted(user_id)
 
     app_id = await user_repository.register_abiturient(
         {
@@ -345,6 +371,19 @@ async def handle_test_answer(
         parse_mode="HTML",
     )
     await state.clear()
+    await callback.answer()
+
+
+@router.callback_query(F.data == "final_consent_reject", SpecialtyRequestForm.pd_consent)
+@safe_handler
+async def spec_consent_reject(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await safe_edit_text(
+        callback.message,
+        BACK_TO_MENU_MESSAGE,
+        reply_markup=KeyboardFactory.create_main_menu_keyboard(),
+        parse_mode="HTML",
+    )
     await callback.answer()
 
 

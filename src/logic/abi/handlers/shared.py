@@ -31,6 +31,18 @@ def is_valid_fio(fio: str) -> bool:
     return bool(FIO_PATTERN.fullmatch(fio))
 
 
+def normalize_phone(raw: str) -> str:
+    """Приведение номера к единому формату +7XXXXXXXXXX."""
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) == 11 and digits[0] == "8":
+        digits = "7" + digits[1:]
+    if len(digits) == 10:
+        digits = "7" + digits
+    if len(digits) == 11 and digits[0] == "7":
+        return "+" + digits
+    return raw
+
+
 def is_valid_phone(phone: str) -> bool:
     return bool(PHONE_PATTERN.fullmatch(phone))
 
