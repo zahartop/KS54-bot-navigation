@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from aiohttp import web
 
-from src.config.settings import Settings
+from src.config.settings import Settings, get_settings
 from src.monitoring.health_checks import check_database_ok, check_telegram_ok
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,21 @@ async def start_health_http(settings: Settings, bot) -> None:
 
     port = getattr(settings, "HEALTHCHECK_PORT", 0) or 0
     if port <= 0:
+        return
+
+    fastapi_raw = os.environ.get("FASTAPI_PORT", "").strip()
+    if fastapi_raw:
+        try:
+            fastapi_port = int(fastapi_raw)
+        except ValueError:
+            fastapi_port = int(get_settings().FASTAPI_PORT or 0)
+    else:
+        fastapi_port = int(get_settings().FASTAPI_PORT or 0)
+    if fastapi_port > 0 and port == fastapi_port:
+        logger.warning(
+            "HEALTHCHECK_PORT=%s совпадает с FASTAPI_PORT — второй слушатель на том же порту не поднимаем.",
+            port,
+        )
         return
 
     host = getattr(settings, "HEALTHCHECK_HOST", "0.0.0.0")

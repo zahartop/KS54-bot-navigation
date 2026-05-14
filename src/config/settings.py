@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     TELEGRAM_FORCE_IPV4: bool = False
     # SOCKS5/SOCKS4 или цепочка — см. aiogram + aiohttp-socks; для HTTP CONNECT подберите прокси с поддержкой HTTPS.
     TELEGRAM_PROXY: SecretStr = Field(default_factory=lambda: SecretStr(""))
+    # HTTP(S) CONNECT прокси для aiohttp.ProxyConnector (корпоративный прокси без SOCKS). Пусто = не используется.
+    TELEGRAM_HTTP_CONNECT_PROXY: SecretStr = Field(default_factory=lambda: SecretStr(""))
     # Ретраи get_me при старте сессии (экспоненциальная пауза между попытками).
     TELEGRAM_STARTUP_MAX_ATTEMPTS: int = Field(default=8, ge=5, le=10)
     TELEGRAM_STARTUP_BACKOFF_INITIAL_SECONDS: float = Field(default=2.0, ge=0.5)
@@ -83,6 +85,22 @@ class Settings(BaseSettings):
     # n8n webhook: POST с данными абитуриента после успешной регистрации (пусто = выключен)
     N8N_WEBHOOK_URL: str = ""
     N8N_WEBHOOK_TIMEOUT_SECONDS: int = 10
+
+    # ─── Kafka (шина событий для Docflow) ─────────────────────────────────
+    KAFKA_BOOTSTRAP_SERVERS: str = ""
+    KAFKA_TOPIC_ENROLLMENT: str = "enrollment_updates"
+    KAFKA_CLIENT_ID: str = "college-bot-producer"
+
+    # ─── REST API (FastAPI, тонкий клиент / интеграции) ───────────────────
+    FASTAPI_HOST: str = "0.0.0.0"
+    FASTAPI_PORT: int = 0  # 0 = не поднимать; в Docker Compose задайте 8090
+    API_SECRET: SecretStr = Field(
+        default_factory=lambda: SecretStr(""),
+        description="X-API-Key для POST /api/v1/content/update и GET export. Пусто = эндпоинты отключены.",
+    )
+
+    # ─── Кэш динамического контента (Redis) ───────────────────────────────
+    CONTENT_CACHE_TTL_SECONDS: int = 300
 
     model_config = SettingsConfigDict(
         env_file=".env",

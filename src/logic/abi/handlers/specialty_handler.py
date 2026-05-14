@@ -6,11 +6,11 @@ import asyncio
 import logging
 
 from aiogram import Bot, F, Router, types
-from aiogram.enums import ContentType
 from aiogram.filters.callback_data import CallbackData
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from src.application.schemas.enrollment_events import EnrollmentEvent
 from src.config.content import (
     BACK_TO_MENU_MESSAGE,
     CANCEL_MESSAGE,
@@ -29,6 +29,7 @@ from src.config.content import (
     WELCOME_MESSAGE,
 )
 from src.data.user_repository import UserRepository
+from src.infrastructure.kafka_enrollment import get_kafka_producer
 from src.logic.abi.handlers.shared import (
     extract_text,
     is_valid_email,
@@ -170,28 +171,25 @@ async def process_specialty_fio(message: types.Message, state: FSMContext, bot: 
     await track_message(sent, state)
 
 
-@router.message(SpecialtyRequestForm.phone, F.content_type.in_({ContentType.TEXT, ContentType.CONTACT}))
+@router.message(SpecialtyRequestForm.phone, F.text == "Отмена ❌")
+@safe_handler
+async def process_specialty_phone_cancel(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(CANCEL_MESSAGE, reply_markup=REPLY_KB_REMOVE)
+    await message.answer(
+        WELCOME_MESSAGE,
+        reply_markup=KeyboardFactory.create_main_menu_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@router.message(SpecialtyRequestForm.phone, F.contact)
 @safe_handler
 async def process_specialty_phone(message: types.Message, state: FSMContext, bot: Bot):
     await delete_prev_message(bot, message.chat.id, state)
-
-    if message.text and message.text.strip() == "Отмена ❌":
-        await state.clear()
-        await message.answer(CANCEL_MESSAGE, reply_markup=REPLY_KB_REMOVE)
-        await message.answer(
-            WELCOME_MESSAGE,
-            reply_markup=KeyboardFactory.create_main_menu_keyboard(),
-            parse_mode="HTML",
-        )
-        return
-
-    raw_phone: str | None = None
-    if message.contact:
-        raw_phone = message.contact.phone_number
-    else:
-        raw_phone = await extract_text(message)
-
-    if raw_phone is None:
+    raw_phone = message.contact.phone_number if message.contact else None
+    if not raw_phone:
+        await message.answer(FORM_ERROR_PHONE, reply_markup=phone_request_kb())
         return
     phone = normalize_phone(raw_phone)
     if not is_valid_phone(phone):
@@ -202,6 +200,24 @@ async def process_specialty_phone(message: types.Message, state: FSMContext, bot
     await state.set_state(SpecialtyRequestForm.email)
     sent = await message.answer(FORM_PHONE_ACCEPTED, reply_markup=REPLY_KB_REMOVE, parse_mode="HTML")
     await track_message(sent, state)
+
+
+@router.message(SpecialtyRequestForm.phone, F.text)
+@safe_handler
+async def process_specialty_phone_wrong(message: types.Message):
+    await message.answer(
+        "Отправьте номер кнопкой «📱 Отправить номер телефона» или нажмите «Отмена ❌».",
+        reply_markup=phone_request_kb(),
+    )
+
+
+@router.message(SpecialtyRequestForm.phone)
+@safe_handler
+async def process_specialty_phone_other(message: types.Message):
+    await message.answer(
+        "Отправьте номер кнопкой «📱 Отправить номер телефона».",
+        reply_markup=phone_request_kb(),
+    )
 
 
 @router.message(SpecialtyRequestForm.email)
@@ -364,6 +380,21 @@ async def spec_consent_accept(
         fio=fio,
         detail=f"Результат теста: {result_key}",
     )
+    kp = get_kafka_producer()
+    if kp is not None:
+        await kp.publish_enrollment(
+            EnrollmentEvent(
+                user_id=user_id,
+                event_type="specialty_completed",
+                payload={
+                    "app_id": app_id,
+                    "fio": fio,
+                    "phone": phone,
+                    "email": email,
+                    "test_result": result_key,
+                },
+            )
+        )
     await safe_edit_text(
         callback.message,
         SPECIALTY_SUCCESS.format(app_id=app_id, fio=fio, phone=phone, email=email, result_text=result_text),

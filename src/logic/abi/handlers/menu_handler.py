@@ -9,6 +9,7 @@ from aiogram import Bot, F, Router, types
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 
+from src.application.schemas.enrollment_events import EnrollmentEvent
 from src.config.content import (
     ABOUT_MESSAGE,
     APPEAL_ACCEPTED,
@@ -22,6 +23,7 @@ from src.config.content import (
     WELCOME_MESSAGE,
 )
 from src.data.user_repository import UserRepository
+from src.infrastructure.kafka_enrollment import get_kafka_producer
 from src.logic.abi.keyboards.kb import appeal_cancel_kb
 from src.logic.abi.states.admission_form import AppealForm
 from src.utils.keyboards import KeyboardFactory
@@ -140,6 +142,21 @@ async def process_appeal_text(
             await bot.send_message(admin_tid, admin_text, parse_mode="HTML")
         except Exception:
             logger.warning("Не удалось отправить обращение админу: %s", admin_tid)
+
+    kp = get_kafka_producer()
+    if kp is not None:
+        await kp.publish_enrollment(
+            EnrollmentEvent(
+                user_id=user_id,
+                event_type="appeal_submitted",
+                payload={
+                    "appeal_id": appeal_id,
+                    "text_preview": text.strip()[:500],
+                    "username": username,
+                    "full_name": full_name,
+                },
+            )
+        )
 
     await state.clear()
     await message.answer(

@@ -1,3 +1,4 @@
+# Сервис бота: ``bot`` (не ``app``). Alembic: ``docker compose exec bot alembic upgrade head``
 services:
   db:
     image: postgres:15-alpine
@@ -53,6 +54,51 @@ services:
     networks:
       - bot_network
 
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: college-bot-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - bot_network
+    # В ZK 3.5+ по умолчанию разрешён только srvr, не ruok — иначе healthcheck всегда unhealthy.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/2181 && printf srvr >&3 && head -n 3 <&3 | grep -qiE \"Zookeeper|Mode\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 25s
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: college-bot-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    networks:
+      - bot_network
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 15s
+      retries: 12
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
   bot:
     build:
       context: .
@@ -64,8 +110,12 @@ services:
     environment:
       TZ: ${TZ:-Europe/Moscow}
       REDIS_HOST: redis
-      # По умолчанию 1: VPS без рабочего IPv6 до api.telegram.org. Выключить: TELEGRAM_FORCE_IPV4=0 в .env рядом с compose (интерполяция).
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
       TELEGRAM_FORCE_IPV4: ${TELEGRAM_FORCE_IPV4:-1}
+      # В Docker всегда включаем API (health, /metrics для Prometheus). Не брать FASTAPI_PORT=0 из .env.
+      FASTAPI_PORT: "8090"
+    ports:
+      - "${FASTAPI_BIND:-127.0.0.1:8090}:8090"
     volumes:
       - bot_logs:/app/logs
     depends_on:
@@ -73,7 +123,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # Частый случай: DNS отдаёт IPv6 для api.telegram.org, а выхода по IPv6 нет → таймаут get_me.
+      kafka:
+        condition: service_healthy
     sysctls:
       - net.ipv6.conf.all.disable_ipv6=1
     dns:
@@ -91,10 +142,81 @@ services:
     networks:
       - bot_network
 
+  # Метрики контейнеров Docker (CPU, память, сеть по cgroups). Prometheus скрейпит cadvisor:8080.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: college-bot-cadvisor
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - bot_network
+
+  # Метрики хоста (Linux VM при Docker Desktop). Дополняет cAdvisor; aiogram сам Prometheus не отдаёт.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: college-bot-node-exporter
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+    volumes:
+      # Без rslave: на Docker Desktop (macOS) rslave даёт «not a shared or slave mount».
+      - "/:/host:ro"
+    networks:
+      - bot_network
+
+  prometheus:
+    image: prom/prometheus:v2.53.1
+    container_name: college-bot-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_BIND:-127.0.0.1:9091}:9090"
+    depends_on:
+      - cadvisor
+      - node-exporter
+    networks:
+      - bot_network
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: college-bot-grafana
+    restart: unless-stopped
+    environment:
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_HTTP_PORT: "3000"
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "${GRAFANA_BIND:-127.0.0.1:3000}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - bot_network
+
 volumes:
   postgres_data:
   bot_logs:
   redis_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   bot_network:

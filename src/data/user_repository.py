@@ -645,6 +645,60 @@ class UserRepository:
             )
         return output.getvalue()
 
+    async def export_applications_json(self, *, limit: int = 5000) -> list[dict[str, Any]]:
+        """Выгрузка заявок ДОД и специальностей в JSON (интеграция Docflow / REST)."""
+
+        try:
+            async with read_only_session(self._sessions()) as session:
+                oda_rows = (
+                    await session.scalars(
+                        select(OpenDayApplication)
+                        .order_by(OpenDayApplication.created_at.desc())
+                        .limit(limit)
+                    )
+                ).all()
+                sr_rows = (
+                    await session.scalars(
+                        select(SpecialtyRequest)
+                        .order_by(SpecialtyRequest.created_at.desc())
+                        .limit(limit)
+                    )
+                ).all()
+        except Exception:
+            logger.exception("export_applications_json")
+            return []
+
+        out: list[dict[str, Any]] = []
+        for r in oda_rows:
+            out.append(
+                {
+                    "type": "open_day",
+                    "id": r.id,
+                    "telegram_user_id": r.telegram_user_id,
+                    "fio": r.fio,
+                    "phone": r.phone,
+                    "email": r.email,
+                    "event_date": r.date.isoformat() if r.date else None,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "status": r.status,
+                }
+            )
+        for r in sr_rows:
+            out.append(
+                {
+                    "type": "specialty",
+                    "id": r.id,
+                    "telegram_user_id": r.telegram_user_id,
+                    "fio": r.fio,
+                    "phone": r.phone,
+                    "email": r.email,
+                    "test_result": r.test_result,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "status": r.status,
+                }
+            )
+        return out
+
     # ─── Recovery рассылок (после рестарта / таймаута) ───────────────────────────
 
     async def open_broadcast_recovery_job(

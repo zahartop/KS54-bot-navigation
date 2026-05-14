@@ -4,11 +4,32 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import BigInteger, Boolean, DateTime, Index, Integer, String, Text, func
+from sqlalchemy import text as sql_text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class BotContent(Base):
+    """Динамический контент экранов бота (тонкий клиент для Docflow / CMS)."""
+
+    __tablename__ = "bot_content"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    buttons: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=sql_text("'[]'::jsonb"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (Index("ix_bot_content_slug", "slug"),)
 
 
 class BroadcastRecoveryJob(Base):

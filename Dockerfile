@@ -13,7 +13,10 @@ WORKDIR /app
 
 # Install dependencies in a separate layer for better Docker cache reuse.
 COPY requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && pip install -r /app/requirements.txt
+RUN pip install --upgrade pip && pip install -r /app/requirements.txt \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user for runtime security.
 RUN useradd --create-home --shell /usr/sbin/nologin appuser

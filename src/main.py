@@ -1,6 +1,7 @@
 import asyncio
 import html
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 from os import path
@@ -11,18 +12,23 @@ project_root = path.dirname(current_dir)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+import uvicorn
 from aiogram import Bot, Dispatcher, Router
 from aiogram.exceptions import TelegramNetworkError, TelegramServerError
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ErrorEvent
+from aiogram.types import BotCommand, ErrorEvent
 from apscheduler.triggers.interval import IntervalTrigger
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from src.api.fastapi_app import create_fastapi_app
+from src.application.content_service import ContentService
 from src.config.settings import Settings, get_settings
 from src.data.database import db_manager
 from src.data.user_repository import UserRepository
+from src.infrastructure.kafka_enrollment import EnrollmentKafkaProducer, set_global_kafka_producer
 from src.logic.abi.education_router import router as education_router
 from src.logic.abi.handlers.consent_handler import router as consent_router
+from src.logic.abi.handlers.fuzzy_unknown_handler import router as fuzzy_unknown_router
 from src.logic.abi.handlers.menu_handler import router as menu_router
 from src.logic.abi.handlers.open_day_handler import router as open_day_router
 from src.logic.abi.handlers.specialty_handler import router as specialty_router
@@ -76,6 +82,26 @@ setup_logging(get_settings().LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
 
+def _fastapi_listen_port(settings: Settings) -> int:
+    """Порт uvicorn: сначала ``os.environ`` (override из docker-compose), иначе ``Settings``."""
+
+    raw = os.environ.get("FASTAPI_PORT", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning("FASTAPI_PORT в окружении некорректен: %r", raw)
+    return int(settings.FASTAPI_PORT or 0)
+
+
+def _log_uvicorn_task_done(task: asyncio.Task[None]) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("[fastapi] uvicorn task failed", exc_info=exc)
+
+
 def _create_fsm_storage(settings: Settings) -> MemoryStorage:
     """RedisStorage если REDIS_HOST задан, иначе MemoryStorage."""
     if not settings.REDIS_HOST:
@@ -104,6 +130,23 @@ async def _db_keepalive_loop(interval_seconds: float) -> None:
         ok = await db_manager.ping_or_repair()
         if not ok:
             logger.error("DB keepalive: пул восстановить не удалось — следующая попытка по интервалу.")
+
+
+async def _install_bot_menu_commands(bot: Bot) -> None:
+    """Синхронизация списка команд в меню Telegram (боковая кнопка / ввод «/»)."""
+
+    try:
+        await bot.set_my_commands(
+            [
+                BotCommand(command="start", description="Главное меню"),
+                BotCommand(command="help", description="Помощь"),
+                BotCommand(command="about", description="О колледже"),
+                BotCommand(command="admin", description="Админ-панель (по правам)"),
+            ]
+        )
+        logger.info("Telegram: set_my_commands — меню команд обновлено.")
+    except Exception:
+        logger.warning("Telegram: set_my_commands не удалось; меню могло остаться прежним.", exc_info=True)
 
 
 async def _delete_webhook_with_retry(bot: Bot) -> None:
@@ -178,9 +221,10 @@ async def _run_single_bot_session() -> None:
     settings = get_settings()
     token = settings.BOT_TOKEN.get_secret_value().strip()
     logger.info(
-        "Telegram client: TELEGRAM_FORCE_IPV4=%s, TELEGRAM_PROXY=%s",
+        "Telegram client: TELEGRAM_FORCE_IPV4=%s, TELEGRAM_PROXY=%s, TELEGRAM_HTTP_CONNECT_PROXY=%s",
         settings.TELEGRAM_FORCE_IPV4,
         "yes" if settings.TELEGRAM_PROXY.get_secret_value().strip() else "no",
+        "yes" if settings.TELEGRAM_HTTP_CONNECT_PROXY.get_secret_value().strip() else "no",
     )
     bot = Bot(token=token, session=create_bot_aiohttp_session(settings))
 
@@ -202,6 +246,10 @@ async def _run_single_bot_session() -> None:
         timeout_seconds=settings.N8N_WEBHOOK_TIMEOUT_SECONDS,
     )
     dp["integration_service"] = StubIntegrationService()
+    content_service = ContentService(db_manager.get_session_factory(), settings)
+    kafka_producer = EnrollmentKafkaProducer(settings)
+    set_global_kafka_producer(kafka_producer)
+    dp["content_service"] = content_service
     policy_pdn_consent_mw = PolicyPdnConsentMiddleware()
     dp.message.middleware(policy_pdn_consent_mw)
     dp.callback_query.middleware(policy_pdn_consent_mw)
@@ -213,7 +261,7 @@ async def _run_single_bot_session() -> None:
     _included = (
         admin_broadcast_router, admin_router, education_router,
         consent_router, open_day_router, specialty_router,
-        survey_router, menu_router,
+        survey_router, menu_router, fuzzy_unknown_router,
     )
     dp.include_router(admin_broadcast_router)
     dp.include_router(admin_router)
@@ -223,6 +271,7 @@ async def _run_single_bot_session() -> None:
     dp.include_router(specialty_router)
     dp.include_router(survey_router)
     dp.include_router(menu_router)
+    dp.include_router(fuzzy_unknown_router)
 
     dp.errors.register(_dispatch_error_logged)
 
@@ -230,9 +279,40 @@ async def _run_single_bot_session() -> None:
     keepalive_task: asyncio.Task[None] | None = None
     watchdog_minutes = max(5, getattr(settings, "WATCHDOG_INTERVAL_MINUTES", 60))
     scheduler_started = False
+    fastapi_task: asyncio.Task[None] | None = None
+    uv_server: uvicorn.Server | None = None
 
     try:
         await db_manager.init_with_retry()
+        await kafka_producer.start()
+
+        fastapi_port = _fastapi_listen_port(settings)
+        logger.info(
+            "[fastapi] listen port=%s env_FASTAPI_PORT=%r settings.FASTAPI_PORT=%s",
+            fastapi_port,
+            os.environ.get("FASTAPI_PORT", ""),
+            settings.FASTAPI_PORT,
+        )
+        if fastapi_port > 0:
+            api_app = create_fastapi_app(
+                user_repository=user_repository,
+                content_service=content_service,
+                kafka_producer=kafka_producer,
+            )
+            uv_cfg = uvicorn.Config(
+                api_app,
+                host=settings.FASTAPI_HOST,
+                port=fastapi_port,
+                log_level="info",
+                loop="asyncio",
+                http="h11",
+                proxy_headers=False,
+            )
+            uv_server = uvicorn.Server(uv_cfg)
+            fastapi_task = asyncio.create_task(uv_server.serve(), name="fastapi_uvicorn")
+            fastapi_task.add_done_callback(_log_uvicorn_task_done)
+            await asyncio.sleep(0)
+            logger.info("[fastapi] http://%s:%s/health", settings.FASTAPI_HOST, fastapi_port)
         # await assert_startup_health(bot)  # отключён для стабильного запуска
 
         scheduler.add_job(
@@ -259,6 +339,7 @@ async def _run_single_bot_session() -> None:
 
         logger.info("Запуск бота...")
         await _delete_webhook_with_retry(bot)
+        await _install_bot_menu_commands(bot)
         await dp.start_polling(bot)
     finally:
         if keepalive_task is not None:
@@ -280,6 +361,17 @@ async def _run_single_bot_session() -> None:
                 scheduler.shutdown(wait=False)
             except Exception:
                 logger.exception("Ошибка остановки APScheduler")
+        if uv_server is not None:
+            uv_server.should_exit = True
+        if fastapi_task is not None:
+            fastapi_task.cancel()
+            try:
+                await fastapi_task
+            except asyncio.CancelledError:
+                logger.debug("[fastapi] uvicorn task cancelled on shutdown.")
+        await kafka_producer.stop()
+        await content_service.close()
+        set_global_kafka_producer(None)
         _detach_routers_from_dispatcher(dp, _included)
         await db_manager.close()
         await bot.session.close()

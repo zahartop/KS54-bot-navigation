@@ -44,6 +44,8 @@ def test_fio_validation_rejects_invalid_values(fio: str) -> None:
     "phone",
     [
         "+79991234567",
+        "+7 9991234567",
+        "79991234567",
         "89991234567",
     ],
 )
@@ -54,8 +56,6 @@ def test_phone_validation_accepts_required_formats(phone: str) -> None:
 @pytest.mark.parametrize(
     "phone",
     [
-        "+7 9991234567",
-        "79991234567",
         "8999123456",
         "899912345678",
         "abc",

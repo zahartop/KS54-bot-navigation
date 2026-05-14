@@ -6,10 +6,10 @@ import asyncio
 import logging
 
 from aiogram import Bot, F, Router, types
-from aiogram.enums import ContentType
 from aiogram.fsm.context import FSMContext
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from src.application.schemas.enrollment_events import EnrollmentEvent
 from src.config.content import (
     BACK_TO_MENU_MESSAGE,
     CANCEL_MESSAGE,
@@ -28,6 +28,7 @@ from src.config.content import (
     WELCOME_MESSAGE,
 )
 from src.data.user_repository import UserRepository
+from src.infrastructure.kafka_enrollment import get_kafka_producer
 from src.logic.abi.dod_reminders import schedule_open_day_reminders
 from src.logic.abi.handlers.shared import (
     extract_text,
@@ -126,28 +127,25 @@ async def process_fio(message: types.Message, state: FSMContext, bot: Bot):
     await track_message(sent, state)
 
 
-@router.message(AdmissionForm.phone, F.content_type.in_({ContentType.TEXT, ContentType.CONTACT}))
+@router.message(AdmissionForm.phone, F.text == "Отмена ❌")
+@safe_handler
+async def process_phone_cancel(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(CANCEL_MESSAGE, reply_markup=REPLY_KB_REMOVE)
+    await message.answer(
+        WELCOME_MESSAGE,
+        reply_markup=KeyboardFactory.create_main_menu_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+@router.message(AdmissionForm.phone, F.contact)
 @safe_handler
 async def process_phone(message: types.Message, state: FSMContext, bot: Bot):
     await delete_prev_message(bot, message.chat.id, state)
-
-    if message.text and message.text.strip() == "Отмена ❌":
-        await state.clear()
-        await message.answer(CANCEL_MESSAGE, reply_markup=REPLY_KB_REMOVE)
-        await message.answer(
-            WELCOME_MESSAGE,
-            reply_markup=KeyboardFactory.create_main_menu_keyboard(),
-            parse_mode="HTML",
-        )
-        return
-
-    raw_phone: str | None = None
-    if message.contact:
-        raw_phone = message.contact.phone_number
-    else:
-        raw_phone = await extract_text(message)
-
-    if raw_phone is None:
+    raw_phone = message.contact.phone_number if message.contact else None
+    if not raw_phone:
+        await message.answer(FORM_ERROR_PHONE, reply_markup=phone_request_kb())
         return
     phone = normalize_phone(raw_phone)
     if not is_valid_phone(phone):
@@ -158,6 +156,24 @@ async def process_phone(message: types.Message, state: FSMContext, bot: Bot):
     await state.set_state(AdmissionForm.email)
     sent = await message.answer(FORM_PHONE_ACCEPTED, reply_markup=REPLY_KB_REMOVE, parse_mode="HTML")
     await track_message(sent, state)
+
+
+@router.message(AdmissionForm.phone, F.text)
+@safe_handler
+async def process_phone_wrong_input(message: types.Message):
+    await message.answer(
+        "Отправьте номер кнопкой «📱 Отправить номер телефона» или нажмите «Отмена ❌».",
+        reply_markup=phone_request_kb(),
+    )
+
+
+@router.message(AdmissionForm.phone)
+@safe_handler
+async def process_phone_non_text(message: types.Message):
+    await message.answer(
+        "Отправьте номер кнопкой «📱 Отправить номер телефона».",
+        reply_markup=phone_request_kb(),
+    )
 
 
 @router.message(AdmissionForm.email)
@@ -276,6 +292,22 @@ async def dod_consent_accept(
         fio=fio,
         detail=f"Дата ДОД: {open_day_date} | Роль: {role_label}",
     )
+    kp = get_kafka_producer()
+    if kp is not None:
+        await kp.publish_enrollment(
+            EnrollmentEvent(
+                user_id=user_id,
+                event_type="open_day_registered",
+                payload={
+                    "app_id": app_id,
+                    "fio": fio,
+                    "phone": phone,
+                    "email": email,
+                    "open_day_date": open_day_date,
+                    "role": role_label,
+                },
+            )
+        )
     try:
         await callback.message.delete()
     except Exception:

@@ -6,7 +6,9 @@ import html
 import logging
 import re
 
+import phonenumbers
 from aiogram import Bot, types
+from phonenumbers import NumberParseException, PhoneNumberFormat
 
 from src.config.content import ADMIN_NEW_APPLICATION
 from src.data.user_repository import UserRepository
@@ -32,7 +34,20 @@ def is_valid_fio(fio: str) -> bool:
 
 
 def normalize_phone(raw: str) -> str:
-    """Приведение номера к единому формату +7XXXXXXXXXX."""
+    """Приведение номера к E.164 (+7…) через ``phonenumbers`` (регион RU)."""
+    raw = (raw or "").strip()
+    if not raw:
+        return raw
+    try:
+        num = phonenumbers.parse(raw, "RU")
+        if not phonenumbers.is_valid_number(num):
+            return _normalize_phone_legacy(raw)
+        return phonenumbers.format_number(num, PhoneNumberFormat.E164)
+    except NumberParseException:
+        return _normalize_phone_legacy(raw)
+
+
+def _normalize_phone_legacy(raw: str) -> str:
     digits = re.sub(r"\D", "", raw)
     if len(digits) == 11 and digits[0] == "8":
         digits = "7" + digits[1:]
@@ -44,7 +59,15 @@ def normalize_phone(raw: str) -> str:
 
 
 def is_valid_phone(phone: str) -> bool:
-    return bool(PHONE_PATTERN.fullmatch(phone))
+    if not phone:
+        return False
+    try:
+        num = phonenumbers.parse(phone, "RU")
+        return phonenumbers.is_valid_number(num) and phonenumbers.format_number(
+            num, PhoneNumberFormat.E164
+        ).startswith("+7")
+    except NumberParseException:
+        return bool(PHONE_PATTERN.fullmatch(phone))
 
 
 def is_valid_email(email: str) -> bool:
